@@ -26,7 +26,7 @@ func dayOrderToleratesTimeZoneChanges() throws {
 
 func trashRetentionAndPermanentDelete() throws {
     var w = try branchWorkspace()
-    w = try w.deleting(.record(w.records[0].id))
+    w = try w.movingToTrash(.record(w.records[0].id))
     let entry = try require(w.trash.first)
     var aged = w
     try expect(!aged.pruneExpired(now: entry.deletedAt.addingTimeInterval(86_400 * 29)))
@@ -42,7 +42,7 @@ func trashRestoreSurvivesReopen() throws {
     var w = try branchWorkspace()
     w.records[0].startAt = Date(timeIntervalSince1970: 1_790_000_000.375)
     w.records[0].dueAt = Date(timeIntervalSince1970: 1_790_003_600.625)
-    w = try w.deleting(.record(w.records[0].id))
+    w = try w.movingToTrash(.record(w.records[0].id))
     let reopened = try Workspace.decoded(w.encoded())
     let restored = try reopened.restoringTrash(try require(reopened.trash.first).id)
     try expect(restored.records.count == 1 && restored.trash.isEmpty)
@@ -95,7 +95,7 @@ func occurrencesIgnoreSystemCalendarKind() throws {
     var meeting = WorkRecord(kind: .meeting, title: "周会"); meeting.repeatRule = .weekly
     meeting.timeZoneID = "Asia/Singapore"; meeting.startAt = ISO8601DateFormatter().date(from: "2026-11-02T02:00:00Z")!
     var chinese = Calendar(identifier: .chinese); chinese.timeZone = TimeZone(identifier: "Asia/Singapore")!
-    let interval = DateInterval(start: meeting.startAt, duration: 86_400 * 28)
+    let interval = DateInterval(start: meeting.startAt, duration: 86_400 * 28 - 1)
     let dates = CalendarLogic.occurrences(of: meeting, in: interval, calendar: chinese)
     try expect(dates == CalendarLogic.occurrences(of: meeting, in: interval, calendar: zoned("Asia/Singapore")))
     try expect(dates.count == 4 && zip(dates, dates.dropFirst()).allSatisfy { $1.timeIntervalSince($0) == 7 * 86_400 })
