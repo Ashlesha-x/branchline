@@ -2,41 +2,54 @@ import SwiftUI
 import AppKit
 import ProgressCore
 
-enum SettingsTab: String, CaseIterable { case general, reminders, calendar, backup, ai, updates }
-
-/// The standard macOS Settings window (⌘,), one tab per area.
-struct SettingsWindow: View {
-    @Bindable var store: AppStore
-    @AppStorage("settingsTab") private var tab = SettingsTab.general.rawValue
-    var body: some View {
-        TabView(selection: $tab) {
-            GeneralSettings(store: store).tabItem { Label("通用", systemImage: "gearshape") }.tag(SettingsTab.general.rawValue)
-            ReminderSettings(store: store).tabItem { Label("提醒", systemImage: "bell") }.tag(SettingsTab.reminders.rawValue)
-            CalendarSettings(store: store).tabItem { Label("日历", systemImage: "calendar") }.tag(SettingsTab.calendar.rawValue)
-            BackupSettings(store: store).tabItem { Label("备份", systemImage: "externaldrive") }.tag(SettingsTab.backup.rawValue)
-            Form { AIClientSettings(store: store) }.formStyle(.grouped).tabItem { Label("AI", systemImage: "sparkles") }.tag(SettingsTab.ai.rawValue)
-            Form { UpdateSettingsSection(updater: AppUpdater.shared) }.formStyle(.grouped).tabItem { Label("更新", systemImage: "arrow.triangle.2.circlepath") }.tag(SettingsTab.updates.rawValue)
-        }
-        .frame(width: 580)
-        .frame(minHeight: 420)
-        .environment(\.locale, Locale(identifier: "zh_CN"))
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general, reminders, calendar, backup, ai, updates
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .general: "通用"; case .reminders: "提醒"; case .calendar: "日历"; case .backup: "备份与恢复"; case .ai: "AI 接入"; case .updates: "关于与更新" }
+    }
+    var symbol: String {
+        switch self { case .general: "gearshape"; case .reminders: "bell"; case .calendar: "calendar"; case .backup: "externaldrive"; case .ai: "sparkles"; case .updates: "arrow.triangle.2.circlepath" }
     }
 }
 
-extension View {
-    /// Opens Settings on a given tab and brings the app forward (the app normally runs as a menu bar accessory).
-    func settingsOpener(_ store: AppStore) -> some View { modifier(SettingsOpener(store: store)) }
-}
-private struct SettingsOpener: ViewModifier {
-    let store: AppStore
-    @Environment(\.openSettings) private var openSettings
-    func body(content: Content) -> some View {
-        content.onChange(of: store.settingsRequest) { _, request in
-            guard let request else { return }
-            UserDefaults.standard.set(request.rawValue, forKey: "settingsTab")
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
-            store.settingsRequest = nil
+/// Settings inside the main window: a column of sections on the left, the selected section on the right.
+struct SettingsPage: View {
+    @Bindable var store: AppStore
+    @AppStorage("settingsTab") private var tab = SettingsTab.general.rawValue
+    private var current: SettingsTab { SettingsTab(rawValue: tab) ?? .general }
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SettingsTab.allCases) { item in
+                    Button { tab = item.rawValue } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: item.symbol).frame(width: 18).foregroundStyle(current == item ? Color.accentColor : .secondary)
+                            Text(item.title)
+                            Spacer(minLength: 0)
+                            if item == .updates && AppUpdater.shared.hasUpdate { Circle().fill(Color.accentColor).frame(width: 7, height: 7) }
+                            if item == .calendar && store.calendarService.pendingChanges > 0 && !store.isDemo { Text("\(store.calendarService.pendingChanges)").font(.caption2).foregroundStyle(.secondary) }
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(current == item ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+                Spacer()
+            }.padding(10).frame(width: 180)
+            Divider()
+            Group {
+                switch current {
+                case .general: GeneralSettings(store: store)
+                case .reminders: ReminderSettings(store: store)
+                case .calendar: CalendarSettings(store: store)
+                case .backup: BackupSettings(store: store)
+                case .ai: Form { AIClientSettings(store: store) }.formStyle(.grouped)
+                case .updates: Form { UpdateSettingsSection(updater: AppUpdater.shared) }.formStyle(.grouped)
+                }
+            }
+            .frame(maxWidth: 680, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 }
@@ -44,6 +57,7 @@ private struct SettingsOpener: ViewModifier {
 private struct GeneralSettings: View {
     @Bindable var store: AppStore
     @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("showDemoSpace") private var showDemoSpace = true
     var body: some View {
         Form {
             Section {
@@ -53,6 +67,37 @@ private struct GeneralSettings: View {
                 if store.loginItem.status == .requiresApproval || store.loginItem.errorMessage != nil {
                     LabeledContent(store.loginItem.statusText) { Button("打开登录项设置") { store.loginItem.openSystemSettings() } }
                 }
+            }
+            Section {
+                Toggle("显示示例空间", isOn: Binding(get: { showDemoSpace }, set: { on in
+                    showDemoSpace = on
+                    if !on && store.isDemo { do { try store.switchSpace(demo: false) } catch { store.error = error.localizedDescription } }
+                })).help("关闭后，空间菜单和欢迎页不再提供示例空间。")
+                LabeledContent("新手引导") {
+                    Button("重新播放") {
+                        if showDemoSpace && !store.isDemo { do { try store.switchSpace(demo: true) } catch { store.error = error.localizedDescription; return } }
+                        if store.tourStop == nil { store.startTour() }
+                    }.help(showDemoSpace ? "在示例空间里一步步介绍主要功能" : "一步步介绍主要功能")
+                }
+            }
+            Section {
+                ForEach(store.workspaceRegistry.entries) { entry in
+                    let active = entry.id == store.activeWorkspaceID
+                    HStack {
+                        Image(systemName: "internaldrive").foregroundStyle(.secondary)
+                        Text(entry.name)
+                        if active { Text(store.isDemo ? "上次使用" : "正在使用").font(.caption).foregroundStyle(.secondary) }
+                        Spacer()
+                        if !active || store.isDemo { Button("打开") { do { try store.switchSpace(demo: false, workspaceID: entry.id) } catch { store.error = error.localizedDescription } } }
+                        Button("重命名…") { store.promptRenameWorkspace(entry.id) }
+                        Button("删除…") { store.confirmDeleteWorkspace(entry.id) }
+                            .disabled(active || store.workspaceRegistry.entries.count == 1)
+                            .help(active ? "正在使用的工作区不能删除，请先切换到其他工作区。" : store.workspaceRegistry.entries.count == 1 ? "至少要保留一个工作区。" : "删除前会再次确认，并要求输入名称。")
+                    }
+                }
+                HStack { Spacer(); Button("新建工作区…") { store.promptNewWorkspace() } }
+            } header: { Text("工作区") } footer: {
+                Text("每个工作区的项目、草稿和回顾互不相通。提醒来自所有工作区；AI 接入和日历写回只作用于正在使用的工作区。").font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 LabeledContent("数据文件夹") { Button("在访达中显示") { NSWorkspace.shared.open(store.dataDirectory) }.help(store.dataDirectory.path) }
@@ -73,7 +118,7 @@ private struct ReminderSettings: View {
                 }
                 HStack {
                     Spacer()
-                    Button(store.notifications.needsSystemSettings ? "打开系统通知设置" : "启用通知") { store.notifications.enableOrOpenSettings(workspace: store.workspace) }
+                    Button(store.notifications.needsSystemSettings ? "打开系统通知设置" : "启用通知") { store.notifications.enableOrOpenSettings(workspace: store.reminderWorkspace) }
                         .help(store.notifications.needsSystemSettings ? "打开“系统设置 › 通知”里脉络的设置页" : "请求系统通知权限；如已被拒绝，会打开系统设置")
                     Button("发送测试通知") { store.notifications.sendTest() }.help("5 秒后发送测试通知")
                 }.disabled(store.isDemo)
@@ -144,7 +189,7 @@ private struct BackupSettings: View {
                     Button("在访达中显示") { NSWorkspace.shared.open(store.iCloudBackupDirectory) }
                         .disabled(!FileManager.default.fileExists(atPath: store.iCloudBackupDirectory.path))
                     Button("立即备份") { store.exportICloudBackup() }
-                        .disabled(store.isDemo).help(store.isDemo ? "示例空间不备份" : "把个人空间备份到 iCloud 云盘／脉络备份")
+                        .disabled(store.isDemo).help(store.isDemo ? "示例空间不备份" : "把当前工作区备份到 iCloud 云盘／脉络备份")
                 }
             }
             if !store.iCloudBackups.isEmpty {
@@ -153,7 +198,7 @@ private struct BackupSettings: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(WorkDateText.short(entry.date, timed: true))
-                                Text([entry.personal ? nil : "示例空间", entry.device, entry.automatic ? "自动" : "手动", entry.upload.title.isEmpty ? nil : entry.upload.title].compactMap { $0 }.joined(separator: " · "))
+                                Text([entry.space, entry.device, entry.automatic ? "自动" : "手动", entry.upload.title.isEmpty ? nil : entry.upload.title].compactMap { $0 }.joined(separator: " · "))
                                     .font(.caption).foregroundStyle(entry.upload == .failed ? Color.red : Color.secondary)
                             }
                             Spacer()

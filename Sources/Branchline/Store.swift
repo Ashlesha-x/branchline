@@ -103,6 +103,14 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     @ObservationIgnored var iCloudBackupMonitor: Task<Void, Never>?
     @ObservationIgnored var nextICloudBackupAttempt = Date.distantPast
     var isDemo = false
+    var workspaceRegistry = WorkspaceRegistry()
+    var tourStop: TourStop?
+    var tourStops: [TourStop] = TourStop.allCases
+    var tourIsUpdate = false
+    var activeWorkspaceID = WorkspaceEntry.defaultID
+    @ObservationIgnored var otherWorkspaceRecords: [String: [WorkRecord]] = [:]
+    /// Full backups of the closed workspaces; they cannot change until opened again.
+    @ObservationIgnored var otherWorkspaceBackups: [String: Data] = [:]
     var routeDetailChoices: [CollapseScope: [String: Bool]] = [:]
     var temporarilyExpandedRoute: UUID?
     var routeRootOrder: [UUID] = [] { didSet { routeLayoutCache.removeAll() } }
@@ -129,7 +137,6 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     @ObservationIgnored var reviewReadFailed = false
     @ObservationIgnored var reviewNeedsWrite = false
     var expandedTaskSeries: Set<UUID> = []
-    var settingsRequest: SettingsTab?
     let calendarService = AppleCalendarService()
     var searchEntityFilter: SearchEntity?
     var focusDate = Date()
@@ -173,7 +180,11 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         do {
             try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
             processLock = try WorkspaceProcessLock(directory: dataDirectory)
-            let repo = try WorkspaceRepository(url: dataDirectory.appendingPathComponent("personal.store"))
+            // Earlier versions record this key on every launch, so it marks a returning user.
+            let returningUser = UserDefaults.standard.object(forKey: "automationMode." + dataDirectory.path) != nil
+            loadWorkspaceRegistry()
+            try FileManager.default.createDirectory(at: workspaceDirectory, withIntermediateDirectories: true)
+            let repo = try WorkspaceRepository(url: workspaceDirectory.appendingPathComponent("personal.store"))
             try recoverInterruptedMigration(using: repo)
             personalRepository = repo; repository = repo
             var loaded = try repo.load() ?? Workspace()
@@ -183,8 +194,10 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             loadDrafts()
             refreshRecurringTasks()
             restoreCollapsed(); restoreRouteDetails()
+            loadOtherWorkspaceRecords()
             if arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "BranchlineDemo") as? Bool == true { try switchSpace(demo: true) }
-            else { notifications.refresh(workspace: workspace, demo: false) }
+            else { refreshReminders() }
+            planUpdateTour(returningUser: returningUser)
             automationMode = initialAutomationMode()
             do {
                 bridge = try LocalBridgeServer(directory: dataDirectory) { [weak self] request in
@@ -215,7 +228,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     /// Snapshots written before deletions, external writes and restores are kept for the
     /// same retention window as the trash. Format-upgrade snapshots are never removed.
     func pruneBackupFiles(now: Date = Date()) {
-        let directory = dataDirectory.appendingPathComponent("Backups", isDirectory: true)
+        let directory = workspaceDirectory.appendingPathComponent("Backups", isDirectory: true)
         let cutoff = now.addingTimeInterval(-Double(Workspace.retentionDays) * 86_400)
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
         for file in files where ["before-delete-", "before-automation-", "before-restore-"].contains(where: { file.lastPathComponent.hasPrefix($0) }) && file.pathExtension == "json" {
@@ -223,7 +236,8 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             try? FileManager.default.removeItem(at: file)
         }
     }
-    func switchSpace(demo: Bool) throws {
+    /// Switches between the demo space and a workspace; `workspaceID` nil keeps the current workspace.
+    func switchSpace(demo: Bool, workspaceID: String? = nil) throws {
         guard startupError == nil else { throw WorkspaceError("请先解决资料库打开错误。") }
         guard !fileDialogPending else { notice = "请先完成或取消文件选择，再切换空间。"; return }
         guard EditorProtection.shared.resolve() else { return }
@@ -231,8 +245,30 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         endQuickProgress()
         let repo: WorkspaceRepository
         let value: Workspace
+        let target = workspaceID ?? activeWorkspaceID
         if demo {
             repo = try WorkspaceRepository(inMemory: true); value = .demo(); try repo.save(value)
+        } else if target != activeWorkspaceID {
+            guard workspaceRegistry.entry(target) != nil else { throw WorkspaceError("工作区已不存在。") }
+            let directory = workspaceDirectory(for: target)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            repo = try WorkspaceRepository(url: directory.appendingPathComponent("personal.store"))
+            let leaving = try personalRepository?.load()
+            let previousID = activeWorkspaceID, previousRepository = personalRepository
+            personalRepository = repo; activeWorkspaceID = target
+            do {
+                try recoverInterruptedMigration(using: repo)
+                value = try repo.load() ?? Workspace()
+            } catch {
+                personalRepository = previousRepository; activeWorkspaceID = previousID
+                throw error
+            }
+            rememberActiveWorkspace()
+            // The workspace being left keeps firing its reminders from the cached records.
+            otherWorkspaceRecords[previousID] = leaving?.records ?? []
+            otherWorkspaceRecords[target] = nil
+            otherWorkspaceBackups[target] = nil; otherWorkspaceBackups[previousID] = nil
+            pruneBackupFiles()
         } else {
             guard let personalRepository else { throw WorkspaceError("个人资料库不可用。") }
             repo = personalRepository; value = try repo.load() ?? Workspace()
@@ -241,8 +277,10 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         repository = repo; workspace = value; isDemo = demo
         loadDrafts()
         selection = nil; projectFilter = nil; search = ""; editor = nil; showingAgenda = false; focusDate = Date(); navigationToken = UUID()
-        restoreCollapsed(); restoreRouteDetails(); pinnedRelationID = nil; hoveredRelationID = nil; notice = demo ? "已切换到示例空间。" : "已切换到个人空间。"
-        if !demo { notifications.refresh(workspace: value, demo: false) }
+        restoreCollapsed(); restoreRouteDetails(); pinnedRelationID = nil; hoveredRelationID = nil; notice = demo ? "已切换到示例空间。" : "已切换到「\(activeWorkspaceName)」。"
+        if !demo { refreshReminders() }
+        if tourStop != nil { tourStop = nil }
+        if demo && !UserDefaults.standard.bool(forKey: Self.tourSeenKey) { startTour() }
     }
     func commit(_ mutate: (inout Workspace) throws -> Void) throws {
         guard startupError == nil, let repository else { throw WorkspaceError("资料库未就绪，未保存任何修改。") }
@@ -253,7 +291,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         let previous = workspace
         workspace = next; savedAt = Date()
         if !isDemo { scheduleCalendarWriteBack(since: previous) }
-        if !isDemo { notifications.refresh(workspace: next, demo: false) }
+        refreshReminders()
         if !isDemo { checkAutomaticICloudBackup() }
     }
     func personalWorkspaceSnapshot() throws -> Workspace { try personalRepository?.load() ?? Workspace() }
@@ -266,7 +304,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         do {
             guard startupError == nil else { throw WorkspaceError("workspace_unavailable") }
             guard automationMode != "off" else { throw WorkspaceError("access_disabled: 请在设置中开启本地接口。") }
-            guard !isDemo else { throw WorkspaceError("demo_space: 请切回个人空间后调用，防止操作临时示例。") }
+            guard !isDemo else { throw WorkspaceError("demo_space: 请切回工作区后调用，防止操作临时示例。") }
             let method = try AutomationAPI.requireString(request, "method")
             let args = request["arguments"]
             let result: JSONValue
@@ -278,14 +316,14 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
                 }
                 let plan = try AutomationAPI.plan(args, in: workspace)
                 if method == "apply_changes" && !plan.replay {
-                    let backups = dataDirectory.appendingPathComponent("Backups")
+                    let backups = workspaceDirectory.appendingPathComponent("Backups")
                     try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
                     try workspace.encoded().write(to: backups.appendingPathComponent("before-automation-\(UUID().uuidString).json"), options: .atomic)
                     try commit { $0 = plan.workspace }
                     pruneBackupFiles()
                     if plan.receipt.changes.contains(where: { change in
                         change["entity"].string == "record" && change["id"].string.flatMap(UUID.init(uuidString:)).flatMap { workspace.record($0) }?.hasReminders == true
-                    }) { notifications.requestAndRefresh(workspace: workspace) }
+                    }) { notifications.requestAndRefresh(workspace: reminderWorkspace) }
                     notice = "AI 客户端已保存 \(plan.receipt.changes.count) 项操作"
                 }
                 result = .object(["revision": .string(workspace.automationRevision), "applied": .bool(method == "apply_changes"), "replayed": .bool(plan.replay), "receipt": try .from(plan.receipt)])
@@ -361,7 +399,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         let saved = workspace.record(selectedID) ?? record
         let location = saved.recordingLocation?.title(in: workspace) ?? "当前工作区"
         notice = "已保存\(saved.kind.title)到「\(location)」。"
-        if !isDemo && record.hasReminders { notifications.requestAndRefresh(workspace: workspace) }
+        if !isDemo && record.hasReminders { notifications.requestAndRefresh(workspace: reminderWorkspace) }
     }
     func saveMerge(_ merge: MergeRecord) throws {
         try commit { try $0.addMerge(merge) }
@@ -379,7 +417,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         else { collapsedByScope[scope, default: []].insert(id) }
         persistCollapsed(in: scope)
     }
-    private var collapseKey: String { "collapsed.\(isDemo ? "demo" : dataDirectory.path)" }
+    private var collapseKey: String { "collapsed.\(isDemo ? "demo" : workspaceDirectory.path)" }
     private func restoreCollapsed() {
         let defaults = Set(workspace.projects.filter { $0.status == .completed || $0.status == .archived }.map(\.id))
         let validIDs = Set(workspace.projects.map(\.id))
@@ -499,7 +537,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         } catch { self.error = error.localizedDescription }
     }
     private func commitDeletion(_ next: Workspace) throws {
-            let directory = dataDirectory.appendingPathComponent("Backups", isDirectory: true)
+            let directory = workspaceDirectory.appendingPathComponent("Backups", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let backup = directory.appendingPathComponent("before-delete-\(fileDate(Date()))-\(UUID().uuidString).json")
             try workspace.encoded().write(to: backup, options: .atomic)
@@ -528,7 +566,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     }
     func openBackupFolder() {
         do {
-            let directory = dataDirectory.appendingPathComponent("Backups", isDirectory: true)
+            let directory = workspaceDirectory.appendingPathComponent("Backups", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             NSWorkspace.shared.open(directory)
         } catch { self.error = error.localizedDescription }
@@ -592,7 +630,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         }
         do {
             guard !isDemo else { return }
-            try writeICloudBackup(migrationSnapshot().encoded(), demo: false)
+            try writeICloudBackup(migrationSnapshot().encoded(), workspace: workspaceRegistry.entry(activeWorkspaceID))
             notice = "已备份到 iCloud 云盘。"
         } catch {
             iCloudBackupFailed = true
@@ -636,7 +674,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         alert.addButton(withTitle: "备份当前内容并恢复"); alert.addButton(withTitle: "取消")
         guard DialogPresentation.confirm(alert) == .alertFirstButtonReturn else { return }
         guard workspaceRevision == revision else { throw WorkspaceError("当前空间内容已变化，请重新选择备份。") }
-        let directory = dataDirectory.appendingPathComponent("Backups")
+        let directory = workspaceDirectory.appendingPathComponent("Backups")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try previous.encoded().write(to: directory.appendingPathComponent("before-restore-\(UUID().uuidString).json"), options: .atomic)
         draftWriteTask?.cancel()
@@ -649,7 +687,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
                 throw error
             }
             workspace = next.workspace; savedAt = Date()
-            notifications.refresh(workspace: workspace, demo: false)
+            refreshReminders()
         }
         recordDrafts = next.drafts.filter { !$0.alreadySaved(in: workspace) }; draftSavedAt = Date(); draftNeedsWrite = false; draftError = nil
         adoptReviewDraft(next.review)

@@ -2,7 +2,7 @@ import Foundation
 import ProgressCore
 
 extension AppStore {
-    var migrationJournal: MigrationRestoreJournal { MigrationRestoreJournal(url: dataDirectory.appendingPathComponent("Drafts/restore-journal.json")) }
+    var migrationJournal: MigrationRestoreJournal { MigrationRestoreJournal(url: workspaceDirectory.appendingPathComponent("Drafts/restore-journal.json")) }
     func migrationSnapshot(personal: Bool = false) throws -> MigrationBackup {
         guard !reviewReadFailed || (personal && isDemo) else { throw WorkspaceError("回顾暂存文件无法读取，未创建缺少回顾的备份。") }
         let values: [RecordDraft]

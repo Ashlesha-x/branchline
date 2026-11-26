@@ -14,7 +14,7 @@ extension AppStore {
         routeLayoutCache[scope] = (workspaceRevision, filter, collapsed, expanded, value)
         return value
     }
-    private var detailPreferenceKey: String { "routeDetails.\(isDemo ? "demo" : dataDirectory.path)" }
+    private var detailPreferenceKey: String { "routeDetails.\(isDemo ? "demo" : workspaceDirectory.path)" }
     private func detailID(_ id: UUID) -> String { "\(projectFilter?.uuidString ?? "all"):\(id)" }
     func restoreRouteDetails() {
         restoreRoutePresentationPreferences()

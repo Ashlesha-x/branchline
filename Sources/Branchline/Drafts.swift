@@ -10,7 +10,7 @@ extension RecurringEdit {
 }
 
 extension AppStore {
-    var draftRepository: RecordDraftRepository { RecordDraftRepository(url: dataDirectory.appendingPathComponent("Drafts/records.json")) }
+    var draftRepository: RecordDraftRepository { RecordDraftRepository(url: workspaceDirectory.appendingPathComponent("Drafts/records.json")) }
     func loadDrafts() {
         draftRecoveryCollapsed = false
         loadReviewDraft()

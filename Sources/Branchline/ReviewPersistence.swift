@@ -2,7 +2,7 @@ import Foundation
 import ProgressCore
 
 extension AppStore {
-    var reviewRepository: ReviewDraftRepository { ReviewDraftRepository(url: dataDirectory.appendingPathComponent("Drafts/review.json")) }
+    var reviewRepository: ReviewDraftRepository { ReviewDraftRepository(url: workspaceDirectory.appendingPathComponent("Drafts/review.json")) }
     func adoptReviewDraft(_ value: ReviewDraft?) {
         reviewSaveTask?.cancel(); reviewSaveTask = nil
         reviewLoading = true

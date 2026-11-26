@@ -78,3 +78,38 @@ import ProgressCore
     db.records.removeAll { $0.id == plain.id }
     try expect(db.removedCalendarLinks(since: beforeDelete).map(\.id) == [plain.id])
 }
+
+@MainActor func workspaceRegistryValidatesNamesAndGuardsDeletion() throws {
+    var registry = WorkspaceRegistry()
+    try expect(registry.entries.count == 1 && registry.entries[0].isDefault && registry.entries[0].name == "个人空间")
+    let work = try registry.add(name: "  工作  ")
+    try expect(work.name == "工作" && !work.isDefault)
+    try expectThrows { try registry.add(name: "工作") }
+    try expectThrows { try registry.add(name: "   ") }
+    try expectThrows { try registry.add(name: "示例空间") }
+    try registry.rename(work.id, to: "公司")
+    try expect(registry.entry(work.id)?.name == "公司")
+    try expectThrows { try registry.rename(work.id, to: "个人空间") }
+    try expectThrows { _ = try registry.remove(work.id, active: work.id, confirmation: "公司") }
+    try expectThrows { _ = try registry.remove(work.id, active: WorkspaceEntry.defaultID, confirmation: "公") }
+    let removed = try registry.remove(work.id, active: WorkspaceEntry.defaultID, confirmation: "公司")
+    try expect(removed.id == work.id && registry.entries.count == 1)
+    try expectThrows { _ = try registry.remove(WorkspaceEntry.defaultID, active: "x", confirmation: "个人空间") }
+    // Workspace names with dashes stay one part of the file name; pruning can be limited to one workspace.
+    let dashed = ICloudBackupFiles.fileName(space: "A-B 组", stamp: "20261126-2000", device: "Mac", automatic: true)
+    try expect(ICloudBackupFiles.spaceName(in: dashed) == "A_B_组" && ICloudBackupFiles.device(in: dashed) == "Mac")
+    let other = (1...40).map { (name: ICloudBackupFiles.fileName(space: "公司", stamp: "s\($0)", device: "Mac", automatic: true), date: Date(timeIntervalSince1970: Double($0) * 60)) }
+    try expect(ICloudBackupFiles.prunable(other, device: "Mac", space: "个人空间").isEmpty)
+    try expect(!ICloudBackupFiles.prunable(other, device: "Mac", space: "公司").isEmpty)
+    let reopened = try JSONDecoder().decode(WorkspaceRegistry.self, from: JSONEncoder().encode(registry))
+    try expect(reopened == registry)
+}
+
+@MainActor func onboardingShowsOnlyNewStopsToReturningUsers() throws {
+    let stops: [(stop: String, introduced: String)] = [("projects", "0.1.0"), ("spaces", "0.17.1"), ("future", "0.18.0")]
+    try expect(OnboardingPlan.stopsToShow(stops, seen: nil, returningUser: false, current: "0.17.1").isEmpty)
+    try expect(OnboardingPlan.stopsToShow(stops, seen: nil, returningUser: true, current: "0.17.1") == ["spaces"])
+    try expect(OnboardingPlan.stopsToShow(stops, seen: "0.17.1", returningUser: true, current: "0.17.1").isEmpty)
+    try expect(OnboardingPlan.stopsToShow(stops, seen: "0.17.1", returningUser: true, current: "0.18.0") == ["future"])
+    try expect(OnboardingPlan.stopsToShow(stops, seen: "0.16.0", returningUser: true, current: "0.18.0") == ["spaces", "future"])
+}

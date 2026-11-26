@@ -37,18 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let store else { return }
                         openWindow(id: "main")
                         NSApp.activate(ignoringOtherApps: true)
-                        if store.isDemo {
-                            do { try store.switchSpace(demo: false) }
-                            catch { store.error = error.localizedDescription }
-                        }
-                        if !store.isDemo { store.openReminder(target) }
+                        store.openReminderFromNotification(target)
                     }
                 }
                 .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
                 .environment(\.locale, Locale(identifier: "zh_CN"))
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     store.checkAutomaticICloudBackup()
-                    if !store.isDemo { store.notifications.refresh(workspace: store.workspace, demo: false) }
+                    store.refreshReminders()
                     store.calendarService.refreshPending(workspace: store.workspace, demo: store.isDemo)
                 }
         }
@@ -66,10 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Button("导出完整备份…") { store.exportBackup() }
                 Button("从备份恢复…") { store.importBackup() }
             }
-        }
-        Settings {
-            SettingsWindow(store: store)
-                .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+            CommandGroup(replacing: .appSettings) { Button("设置…") { openWindow(id: "main"); store.openSettings(); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",") }
         }
         Window("Apple 日历同步", id: "calendar-sync") {
             CalendarImportView(store: store)
@@ -84,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MainView: View {
     @Bindable var store: AppStore
+    @AppStorage("showDemoSpace") private var showDemoSpace = true
     @Environment(\.openWindow) private var openWindow
     @AppStorage("inspectorWidth") private var inspectorWidth = 340.0
     @AppStorage("canvasSidebarHidden") private var canvasSidebarHidden = false
@@ -115,6 +109,7 @@ struct MainView: View {
                             Divider()
                         }
                         if store.showingReview { ReviewView(store: store).id(store.browseSpaceToken) }
+                        else if store.showingSettings { SettingsPage(store: store).id(store.browseSpaceToken) }
                         else if store.showingTrash { TrashPanel(store: store).id(store.browseSpaceToken) }
                         else if store.workspace.projects.isEmpty && store.workspace.branches.isEmpty { welcome }
                         else {
@@ -156,10 +151,10 @@ struct MainView: View {
                         }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 9)
                     }
                 }
+                .overlayPreferenceValue(TourAnchorKey.self) { anchors in TourOverlay(store: store, anchors: anchors).allowsHitTesting(store.tourStop != nil) }
             }
         }
         .frame(minWidth: 960, minHeight: 600)
-        .settingsOpener(store)
         .onAppear { store.calendarService.loadIfAuthorized(); store.calendarService.refreshPending(workspace: store.workspace, demo: store.isDemo) }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged).debounce(for: .seconds(2), scheduler: RunLoop.main)) { _ in
             store.calendarService.refreshPending(workspace: store.workspace, demo: store.isDemo, force: true)
@@ -197,8 +192,8 @@ struct MainView: View {
                         Button { store.browseForward() } label: { Image(systemName: "chevron.right") }.disabled(!store.canBrowseForward).help("前进到下一项（⌘]）").accessibilityLabel("前进到下一项").keyboardShortcut("]", modifiers: .command)
                     }.buttonStyle(.plain)
                 }
-                Text(store.showingTrash ? "回收站" : store.showingReview ? "回顾" : store.isSearching ? "搜索" : store.showingAgenda ? "待办" : store.workspace.project(store.projectFilter)?.title ?? "全部项目").font(.title3.weight(.semibold)).lineLimit(1)
-                if store.isDemo { Label("示例", systemImage: "sparkles").font(.caption).foregroundStyle(.secondary).help("示例空间的修改仅在本次运行保留，不会写入个人空间。可从侧栏切换空间。") }
+                Text(store.showingSettings ? "设置" : store.showingTrash ? "回收站" : store.showingReview ? "回顾" : store.isSearching ? "搜索" : store.showingAgenda ? "待办" : store.workspace.project(store.projectFilter)?.title ?? "全部项目").font(.title3.weight(.semibold)).lineLimit(1)
+                if store.isDemo { Label("示例", systemImage: "sparkles").font(.caption).foregroundStyle(.secondary).help("示例空间的修改仅在本次运行保留，不会写入你的工作区。可从侧栏切换。") }
                 Spacer(minLength: 12)
                 if store.editor == nil && store.draftRecoveryCollapsed && !store.recoverableDrafts.isEmpty {
                     Menu("草稿 \(store.recoverableDrafts.count)") {
@@ -211,6 +206,7 @@ struct MainView: View {
                     TextField("搜索项目、分支、记录与成果", text: $store.search).textFieldStyle(.roundedBorder).frame(width: 225).accessibilityLabel("统一搜索")
                     RecordFilterButton(store: store)
                     if store.isSearching { Button { store.search = ""; store.searchPanelVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("清空搜索") }
+                    HStack(spacing: 12) {
                     Button { store.beginQuickProgress(.main) } label: { Label("记进度", systemImage: "square.and.pencil") }.buttonStyle(.borderedProminent).disabled(store.workspace.projects.isEmpty && store.workspace.branches.isEmpty)
                     Menu {
                         Button("进度记录") { store.newRecord(.progress) }
@@ -220,11 +216,12 @@ struct MainView: View {
                         Button("项目") { store.editor = .project(Project()) }
                         Button("分支") { store.editor = .branch(Branch(projectIDs: store.projectFilter.map { [$0] } ?? [])) }
                     } label: { Label("新增", systemImage: "plus") }.menuStyle(.borderlessButton).fixedSize()
+                    }.tourAnchor(.record)
                 }
             }
             if !store.showingUtilityPage && !store.showingReview && !store.showingAgenda && !store.isSearching && (!store.workspace.projects.isEmpty || !store.workspace.branches.isEmpty) {
                 HStack(spacing: 10) {
-                    Picker("视图", selection: Binding(get: { store.mode }, set: { value in store.browse { store.mode = value; store.showingAgenda = false } })) { ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().frame(width: 245)
+                    Picker("视图", selection: Binding(get: { store.mode }, set: { value in store.browse { store.mode = value; store.showingAgenda = false } })) { ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().frame(width: 245).tourAnchor(.views)
                     Spacer(minLength: 8)
                     if store.mode == .timeline { timelineControls }
                     if store.mode == .graph {
@@ -258,7 +255,8 @@ struct MainView: View {
             Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 46, weight: .light)).foregroundStyle(.blue)
             Text("从第一条工作线索开始").font(.title2.weight(.medium))
             Text("创建项目，分出探索方向，记录每一步进展。").multilineTextAlignment(.center).foregroundStyle(.secondary)
-            HStack(spacing: 12) { Button("创建第一个项目") { store.editor = .project(Project()) }.buttonStyle(.borderedProminent); Button("体验示例空间") { switchSpace(true) } }
+            HStack(spacing: 12) { Button("创建第一个项目") { store.editor = .project(Project()) }.buttonStyle(.borderedProminent); if showDemoSpace { Button("体验示例空间") { switchSpace(true) } } }
+            if showDemoSpace { Button("带我看一遍怎么用") { switchSpace(true); if store.isDemo && store.tourStop == nil { store.startTour() } }.buttonStyle(.link) }
             Button("从已有备份恢复…") { store.importBackup() }.buttonStyle(.link)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -267,14 +265,15 @@ struct MainView: View {
 
 struct Sidebar: View {
     @Bindable var store: AppStore
+    @AppStorage("showDemoSpace") private var showDemoSpace = true
     @LocalState private var hoveredRouteID: UUID?
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack { Text("脉络").font(.headline); Spacer(); Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(.secondary) }.padding(18)
             ScrollView {
                 VStack(alignment: .leading, spacing: 5) {
-                    navRow("待办", symbol: "checklist", selected: store.showingAgenda, color: .orange) { store.browse { store.showingAgenda = true; store.projectFilter = nil; store.selection = nil; store.search = "" } }
-                    navRow("回顾", symbol: "doc.text.magnifyingglass", selected: store.showingReview, color: .secondary) { store.openReview() }
+                    navRow("待办", symbol: "checklist", selected: store.showingAgenda, color: .orange) { store.browse { store.showingAgenda = true; store.projectFilter = nil; store.selection = nil; store.search = "" } }.tourAnchor(.agenda)
+                    navRow("回顾", symbol: "doc.text.magnifyingglass", selected: store.showingReview, color: .secondary) { store.openReview() }.tourAnchor(.review)
                     navRow("回收站", symbol: "trash", selected: store.showingTrash, color: .secondary) { store.openTrash() }
                     navRow("全部项目", symbol: "square.stack.3d.up", selected: store.projectFilter == nil && !store.showingAgenda && !store.showingUtilityPage && !store.showingReview, color: .blue) { store.browse { store.showingAgenda = false; store.projectFilter = nil; store.selection = nil; if store.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { store.searchPanelVisible = false } } }
                     Text("项目与独立分支").font(.caption).foregroundStyle(.secondary).padding(.leading, 10).padding(.top, 16).padding(.bottom, 4)
@@ -288,22 +287,34 @@ struct Sidebar: View {
                         }
                     }
                 }.padding(.horizontal, 10)
-            }
+            }.tourAnchor(.projects)
             Divider()
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Menu {
-                    Button("个人空间") { changeSpace(false) }
-                    Button("示例空间（独立体验）") { changeSpace(true) }
-                } label: { Label(store.isDemo ? "示例空间" : "个人空间", systemImage: store.isDemo ? "sparkles" : "internaldrive") }
-                .menuStyle(.borderlessButton)
-                navRow("设置", symbol: "gearshape", selected: false, color: .secondary) { store.openSettings() }
-            }.padding(18)
+                    ForEach(store.workspaceRegistry.entries) { entry in
+                        Button { changeWorkspace(entry.id) } label: {
+                            if !store.isDemo && entry.id == store.activeWorkspaceID { Label(entry.name, systemImage: "checkmark") } else { Text(entry.name) }
+                        }
+                    }
+                    Divider()
+                    Button("新建工作区…") { store.promptNewWorkspace() }
+                    if !store.isDemo { Button("重命名「\(store.activeWorkspaceName)」…") { store.promptRenameWorkspace(store.activeWorkspaceID) } }
+                    Button("管理工作区…") { store.openSettings(.general) }
+                    if showDemoSpace {
+                        Divider()
+                        Button { changeSpace(true) } label: { if store.isDemo { Label("示例空间", systemImage: "checkmark") } else { Text("示例空间（独立体验）") } }
+                    }
+                } label: { Label(store.spaceTitle, systemImage: store.isDemo ? "sparkles" : "internaldrive") }
+                .menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 10).padding(.vertical, 6).tourAnchor(.spaces)
+                navRow("设置", symbol: "gearshape", selected: store.showingSettings, color: .secondary) { store.openSettings() }.tourAnchor(.settings)
+            }.padding(.horizontal, 10).padding(.vertical, 12)
         }.background(.bar)
     }
     private func navRow(_ title: String, symbol: String, selected: Bool, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) { HStack { Image(systemName: symbol).foregroundStyle(color); Text(title).lineLimit(1); Spacer(minLength: 0); if symbol == "gearshape" && AppUpdater.shared.hasUpdate { Text("有更新").font(.caption2.weight(.semibold)).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2).background(Color.accentColor, in: Capsule()) } }.padding(.horizontal, 10).padding(.vertical, 9).background(selected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain)
     }
     private func changeSpace(_ demo: Bool) { do { try store.switchSpace(demo: demo) } catch { store.error = error.localizedDescription } }
+    private func changeWorkspace(_ id: String) { do { try store.switchSpace(demo: false, workspaceID: id) } catch { store.error = error.localizedDescription } }
     private func projectEntry(_ project: Project) -> some View {
                         HStack(spacing: 5) {
                             Button { store.toggleCollapsed(project.id, in: .sidebar) } label: { Image(systemName: store.isCollapsed(project.id, in: .sidebar) ? "chevron.right" : "chevron.down").font(.caption).frame(width: 14, height: 28) }.buttonStyle(.plain).accessibilityLabel("\(store.isCollapsed(project.id, in: .sidebar) ? "展开" : "折叠")\(project.title)")
