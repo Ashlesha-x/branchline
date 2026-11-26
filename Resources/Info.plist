@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>脉络</string>
+	<key>CFBundleExecutable</key>
+	<string>Branchline</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.branchline.progress</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh_CN</string>
+		<string>en</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>脉络</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.15.2</string>
+	<key>CFBundleVersion</key>
+	<string>30</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>LSUIElement</key>
+	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>local.branchline.source</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>branchline</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>读取你选择的日历和时间段，将事件导入及更新为脉络中的会议。同步方向为 Apple 日历到脉络。</string>
+</dict>
+</plist>

@@ -1,0 +1,21 @@
+# Swift / Xcode
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# 构建产物（安装包通过 GitHub Releases 发布）
+dist/
+*.app/
+*.zip
+
+# 个人数据、备份与本地验证记录
+*.json
+!Package.resolved
+验证记录/
+
+# macOS
+.DS_Store
+._*
+__MACOSX/
