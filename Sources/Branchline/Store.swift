@@ -105,6 +105,8 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     var isDemo = false
     var workspaceRegistry = WorkspaceRegistry()
     var tourStop: TourStop?
+    var tourStops: [TourStop] = TourStop.allCases
+    var tourIsUpdate = false
     var activeWorkspaceID = WorkspaceEntry.defaultID
     @ObservationIgnored var otherWorkspaceRecords: [String: [WorkRecord]] = [:]
     /// Full backups of the closed workspaces; they cannot change until opened again.
@@ -178,6 +180,8 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         do {
             try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
             processLock = try WorkspaceProcessLock(directory: dataDirectory)
+            // Earlier versions record this key on every launch, so it marks a returning user.
+            let returningUser = UserDefaults.standard.object(forKey: "automationMode." + dataDirectory.path) != nil
             loadWorkspaceRegistry()
             try FileManager.default.createDirectory(at: workspaceDirectory, withIntermediateDirectories: true)
             let repo = try WorkspaceRepository(url: workspaceDirectory.appendingPathComponent("personal.store"))
@@ -193,6 +197,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             loadOtherWorkspaceRecords()
             if arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "BranchlineDemo") as? Bool == true { try switchSpace(demo: true) }
             else { refreshReminders() }
+            planUpdateTour(returningUser: returningUser)
             automationMode = initialAutomationMode()
             do {
                 bridge = try LocalBridgeServer(directory: dataDirectory) { [weak self] request in

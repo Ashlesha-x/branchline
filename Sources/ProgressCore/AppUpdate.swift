@@ -152,3 +152,17 @@ public enum AppUpdatePolicy {
         return nil
     }
 }
+
+/// Which onboarding stops a launch should show. A new user gets the full tour elsewhere and
+/// only has the current version recorded; a returning user sees just the stops introduced after
+/// the version they last saw (`fallbackSeen` when they used the app before tours existed).
+public enum OnboardingPlan {
+    public static func stopsToShow<Stop>(_ stops: [(stop: Stop, introduced: String)], seen: String?, returningUser: Bool, current: String, fallbackSeen: String = "0.17.0") -> [Stop] {
+        guard let currentVersion = AppVersion(current) else { return [] }
+        guard let seenText = seen ?? (returningUser ? fallbackSeen : nil), let seenVersion = AppVersion(seenText) else { return [] }
+        return stops.filter { item in
+            guard let introduced = AppVersion(item.introduced) else { return false }
+            return seenVersion < introduced && !(currentVersion < introduced)
+        }.map(\.stop)
+    }
+}

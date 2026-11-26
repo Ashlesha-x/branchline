@@ -30,6 +30,7 @@ func expectThrows(_ body: () throws -> Void) throws {
             ("short dates drop the current year", shortDatesDropCurrentYearAndKeepOthers),
             ("calendar write-back candidates and notes", calendarWriteBackCandidatesAndNotes),
             ("workspace registry names and deletion guards", workspaceRegistryValidatesNamesAndGuardsDeletion),
+            ("onboarding shows only new stops to returning users", onboardingShowsOnlyNewStopsToReturningUsers),
             ("calendar recurrence identity and fixed reminder protection", calendarSyncKeepsOccurrenceIdentityAndProtectsFixedReminders),
             ("review manual edits undo reopen and migration", reviewEditsUndoAndMigrationSurviveReopen),
             ("review separates occurred and upcoming meetings", reviewSeparatesPastAndFutureMeetings),

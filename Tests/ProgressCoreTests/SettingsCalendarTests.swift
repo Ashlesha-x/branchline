@@ -104,3 +104,12 @@ import ProgressCore
     let reopened = try JSONDecoder().decode(WorkspaceRegistry.self, from: JSONEncoder().encode(registry))
     try expect(reopened == registry)
 }
+
+@MainActor func onboardingShowsOnlyNewStopsToReturningUsers() throws {
+    let stops: [(stop: String, introduced: String)] = [("projects", "0.1.0"), ("spaces", "0.17.1"), ("future", "0.18.0")]
+    try expect(OnboardingPlan.stopsToShow(stops, seen: nil, returningUser: false, current: "0.17.1").isEmpty)
+    try expect(OnboardingPlan.stopsToShow(stops, seen: nil, returningUser: true, current: "0.17.1") == ["spaces"])
+    try expect(OnboardingPlan.stopsToShow(stops, seen: "0.17.1", returningUser: true, current: "0.17.1").isEmpty)
+    try expect(OnboardingPlan.stopsToShow(stops, seen: "0.17.1", returningUser: true, current: "0.18.0") == ["future"])
+    try expect(OnboardingPlan.stopsToShow(stops, seen: "0.16.0", returningUser: true, current: "0.18.0") == ["spaces", "future"])
+}
