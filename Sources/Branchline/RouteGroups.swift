@@ -2,7 +2,7 @@ import SwiftUI
 import ProgressCore
 
 extension AppStore {
-    private var routePreferenceKey: String { "routePresentation.\(isDemo ? "demo" : dataDirectory.path)" }
+    private var routePreferenceKey: String { "routePresentation.\(isDemo ? "demo" : workspaceDirectory.path)" }
     func restoreRoutePresentationPreferences() {
         routeRootOrder = (UserDefaults.standard.stringArray(forKey: routePreferenceKey + ".roots") ?? []).compactMap(UUID.init(uuidString:))
         routeStatusChoices = Dictionary(uniqueKeysWithValues: CollapseScope.allCases.map { scope in

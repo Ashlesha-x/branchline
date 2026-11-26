@@ -73,6 +73,31 @@ private struct GeneralSettings: View {
                     showDemoSpace = on
                     if !on && store.isDemo { do { try store.switchSpace(demo: false) } catch { store.error = error.localizedDescription } }
                 })).help("关闭后，空间菜单和欢迎页不再提供示例空间。")
+                LabeledContent("新手引导") {
+                    Button("重新播放") {
+                        if showDemoSpace && !store.isDemo { do { try store.switchSpace(demo: true) } catch { store.error = error.localizedDescription; return } }
+                        if store.tourStop == nil { store.startTour() }
+                    }.help(showDemoSpace ? "在示例空间里一步步介绍主要功能" : "一步步介绍主要功能")
+                }
+            }
+            Section {
+                ForEach(store.workspaceRegistry.entries) { entry in
+                    let active = entry.id == store.activeWorkspaceID
+                    HStack {
+                        Image(systemName: "internaldrive").foregroundStyle(.secondary)
+                        Text(entry.name)
+                        if active { Text(store.isDemo ? "上次使用" : "正在使用").font(.caption).foregroundStyle(.secondary) }
+                        Spacer()
+                        if !active || store.isDemo { Button("打开") { do { try store.switchSpace(demo: false, workspaceID: entry.id) } catch { store.error = error.localizedDescription } } }
+                        Button("重命名…") { store.promptRenameWorkspace(entry.id) }
+                        Button("删除…") { store.confirmDeleteWorkspace(entry.id) }
+                            .disabled(active || store.workspaceRegistry.entries.count == 1)
+                            .help(active ? "正在使用的工作区不能删除，请先切换到其他工作区。" : store.workspaceRegistry.entries.count == 1 ? "至少要保留一个工作区。" : "删除前会再次确认，并要求输入名称。")
+                    }
+                }
+                HStack { Spacer(); Button("新建工作区…") { store.promptNewWorkspace() } }
+            } header: { Text("工作区") } footer: {
+                Text("每个工作区的项目、草稿和回顾互不相通。提醒来自所有工作区；AI 接入和日历写回只作用于正在使用的工作区。").font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 LabeledContent("数据文件夹") { Button("在访达中显示") { NSWorkspace.shared.open(store.dataDirectory) }.help(store.dataDirectory.path) }
@@ -93,7 +118,7 @@ private struct ReminderSettings: View {
                 }
                 HStack {
                     Spacer()
-                    Button(store.notifications.needsSystemSettings ? "打开系统通知设置" : "启用通知") { store.notifications.enableOrOpenSettings(workspace: store.workspace) }
+                    Button(store.notifications.needsSystemSettings ? "打开系统通知设置" : "启用通知") { store.notifications.enableOrOpenSettings(workspace: store.reminderWorkspace) }
                         .help(store.notifications.needsSystemSettings ? "打开“系统设置 › 通知”里脉络的设置页" : "请求系统通知权限；如已被拒绝，会打开系统设置")
                     Button("发送测试通知") { store.notifications.sendTest() }.help("5 秒后发送测试通知")
                 }.disabled(store.isDemo)
@@ -164,7 +189,7 @@ private struct BackupSettings: View {
                     Button("在访达中显示") { NSWorkspace.shared.open(store.iCloudBackupDirectory) }
                         .disabled(!FileManager.default.fileExists(atPath: store.iCloudBackupDirectory.path))
                     Button("立即备份") { store.exportICloudBackup() }
-                        .disabled(store.isDemo).help(store.isDemo ? "示例空间不备份" : "把个人空间备份到 iCloud 云盘／脉络备份")
+                        .disabled(store.isDemo).help(store.isDemo ? "示例空间不备份" : "把当前工作区备份到 iCloud 云盘／脉络备份")
                 }
             }
             if !store.iCloudBackups.isEmpty {
@@ -173,7 +198,7 @@ private struct BackupSettings: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(WorkDateText.short(entry.date, timed: true))
-                                Text([entry.personal ? nil : "示例空间", entry.device, entry.automatic ? "自动" : "手动", entry.upload.title.isEmpty ? nil : entry.upload.title].compactMap { $0 }.joined(separator: " · "))
+                                Text([entry.space, entry.device, entry.automatic ? "自动" : "手动", entry.upload.title.isEmpty ? nil : entry.upload.title].compactMap { $0 }.joined(separator: " · "))
                                     .font(.caption).foregroundStyle(entry.upload == .failed ? Color.red : Color.secondary)
                             }
                             Spacer()

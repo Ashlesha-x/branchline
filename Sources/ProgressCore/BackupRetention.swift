@@ -7,8 +7,8 @@ public enum ICloudBackupFiles {
 
     /// "脉络-个人空间-20261126-2000-MacBook-自动-<uuid>.json"
     public static func fileName(space: String, stamp: String, device: String, automatic: Bool, id: UUID = UUID()) -> String {
-        let device = sanitize(device)
-        return "脉络-\(space)-\(stamp)" + (device.isEmpty ? "" : "-\(device)") + (automatic ? automaticMarker : "-") + id.uuidString + ".json"
+        let device = sanitize(device), space = sanitize(space)
+        return "脉络-\(space.isEmpty ? "工作区" : space)-\(stamp)" + (device.isEmpty ? "" : "-\(device)") + (automatic ? automaticMarker : "-") + id.uuidString + ".json"
     }
 
     public static func sanitize(_ device: String) -> String {
@@ -20,6 +20,11 @@ public enum ICloudBackupFiles {
 
     public static func isAutomatic(_ name: String) -> Bool { name.contains(automaticMarker) }
     public static func isPersonal(_ name: String) -> Bool { name.hasPrefix("脉络-个人空间-") }
+    /// The workspace name embedded in a file name ("个人空间", "示例空间", or a workspace's own name).
+    public static func spaceName(in name: String) -> String? {
+        let parts = name.components(separatedBy: "-")
+        return parts.count > 2 && parts[0] == "脉络" ? parts[1] : nil
+    }
 
     /// Device label embedded in a file name, if any (between the timestamp and the marker/uuid).
     public static func device(in name: String) -> String? {
@@ -38,11 +43,14 @@ public enum ICloudBackupFiles {
     }
 
     /// Keeps the newest `keepRecent` automatic backups of this device, plus the newest one of each
-    /// earlier calendar month. Returns the files that may be deleted.
-    public static func prunable(_ files: [(name: String, date: Date)], device: String, keepRecent: Int = 30, calendar: Calendar = .current) -> [String] {
+    /// earlier calendar month, per workspace when `space` is given. Returns the files that may be deleted.
+    /// With `space`, only that workspace's backups are considered.
+    public static func prunable(_ files: [(name: String, date: Date)], device: String, space: String? = nil, keepRecent: Int = 30, calendar: Calendar = .current) -> [String] {
         let tag = sanitize(device)
+        let spaceTag = space.map(sanitize)
         let mine = files.filter { file -> Bool in
             guard isAutomatic(file.name) else { return false }
+            if let spaceTag, Self.spaceName(in: file.name) != spaceTag { return false }
             let label: String = Self.device(in: file.name) ?? ""
             return label == tag
         }

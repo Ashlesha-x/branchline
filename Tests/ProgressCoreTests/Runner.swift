@@ -29,6 +29,7 @@ func expectThrows(_ body: () throws -> Void) throws {
             ("daily backup status next run and skip", dailyBackupStatusReportsNextRunAndSkips),
             ("short dates drop the current year", shortDatesDropCurrentYearAndKeepOthers),
             ("calendar write-back candidates and notes", calendarWriteBackCandidatesAndNotes),
+            ("workspace registry names and deletion guards", workspaceRegistryValidatesNamesAndGuardsDeletion),
             ("calendar recurrence identity and fixed reminder protection", calendarSyncKeepsOccurrenceIdentityAndProtectsFixedReminders),
             ("review manual edits undo reopen and migration", reviewEditsUndoAndMigrationSurviveReopen),
             ("review separates occurred and upcoming meetings", reviewSeparatesPastAndFutureMeetings),

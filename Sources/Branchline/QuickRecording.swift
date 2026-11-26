@@ -14,7 +14,7 @@ extension AppStore {
         case nil: nil
         }
     }
-    private var recentLocationKey: String { "recording.locations.\(dataDirectory.path).\(isDemo ? "demo" : "personal")" }
+    private var recentLocationKey: String { "recording.locations.\(workspaceDirectory.path).\(isDemo ? "demo" : "personal")" }
     private var storedRecordingLocations: [RecordingLocation] {
         guard let data = UserDefaults.standard.data(forKey: recentLocationKey) else { return [] }
         return (try? JSONDecoder().decode([RecordingLocation].self, from: data)) ?? []
