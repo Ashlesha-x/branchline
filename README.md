@@ -25,8 +25,8 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/Ashlesha-x/branchline/releases) 下载 `Branchline-<版本>-macOS-arm64.zip`。
-2. 解压得到 `脉络.app`，可以复制到“应用程序”，也可以直接在当前位置使用。
+1. 在 [Releases](https://github.com/Ashlesha-x/branchline/releases) 下载 `Branchline-<版本>-macOS-arm64.dmg`（0.15.2 及更早版本为 .zip）。
+2. 打开磁盘映像，把 `脉络.app` 拖到“应用程序”文件夹。放在“应用程序”中才能使用自动更新。
 3. 应用使用临时签名，未经 Apple 公证。首次打开如被系统拦截，在访达中右键应用选择“打开”，或在终端执行：
 
    ```sh
@@ -83,6 +83,7 @@
 ```sh
 zsh scripts/build.sh   # 构建并签名，输出 dist/脉络.app
 zsh scripts/test.sh    # 运行核心检查
+zsh scripts/make-dmg.sh # 打包 dist/Branchline-<版本>-macOS-arm64.dmg（先运行 build.sh）
 ```
 
 持久化使用 Core Data，界面使用 SwiftUI，不依赖 SwiftData，也不需要完整的 XCTest。构建产物使用本机临时签名。
