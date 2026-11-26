@@ -69,7 +69,7 @@ extension AppStore {
             throw WorkspaceError("未找到 iCloud 云盘。请在系统设置中开启，并确认访达可以打开；也可使用“导出完整备份”自行选择位置。")
         }
         let directory = drive.appendingPathComponent("脉络备份", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let space = demo ? "示例空间" : "个人空间"
         let url = directory.appendingPathComponent("脉络-\(space)-\(fileDate(now))-\(UUID().uuidString).json")
         try data.write(to: url, options: .atomic)

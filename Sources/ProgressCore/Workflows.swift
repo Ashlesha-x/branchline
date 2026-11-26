@@ -31,6 +31,12 @@ extension WorkRecord {
     public func reminderOccurrences(in interval: DateInterval) -> [Date] {
         Array(Set(reminderSchedule(in: interval).map(\.date))).sorted()
     }
+    /// Noon on the calendar day `date` falls on in `timeZoneID`; date-only values anchored here
+    /// keep their day under any UTC offset within ±11 hours.
+    public static func dateOnlyAnchor(_ date: Date, timeZoneID: String) -> Date {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: timeZoneID) ?? .current
+        return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: calendar.startOfDay(for: date)) ?? date
+    }
     public func rescheduleDelta(from old: WorkRecord) -> TimeInterval? {
         if kind == .task, dueAt != old.dueAt, let dueAt, let previous = old.dueAt { return dueAt.timeIntervalSince(previous) }
         if startAt != old.startAt { return startAt.timeIntervalSince(old.startAt) }
@@ -86,6 +92,13 @@ public struct AgendaItem: Identifiable, Sendable {
     public var id: String { "\(record.id)-\(date.timeIntervalSince1970)" }
 }
 extension Workspace {
+    /// Start of the same year-month-day in `calendar` as `date` has in `timeZoneID`.
+    static func sameCalendarDay(_ date: Date, from timeZoneID: String, in calendar: Calendar) -> Date {
+        var source = Calendar(identifier: .gregorian); source.timeZone = TimeZone(identifier: timeZoneID) ?? calendar.timeZone
+        let parts = source.dateComponents([.year, .month, .day], from: date)
+        var target = Calendar(identifier: .gregorian); target.timeZone = calendar.timeZone
+        return target.date(from: parts).map { calendar.startOfDay(for: $0) } ?? date
+    }
     public func agenda(_ scope: AgendaScope, now: Date, calendar: Calendar = .current) -> [AgendaItem] {
         let day = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: scope == .week ? 7 : 1, to: day)!
@@ -108,7 +121,11 @@ extension Workspace {
             case .blocked: include = !blockedBy(record).isEmpty
             case .unscheduled: include = undated
             case .today, .week:
-                let dueInRange = record.dueAt.map { $0 >= day && $0 < end } ?? false
+                let dueInRange = record.dueAt.map { due in
+                    // Date-only deadlines are a day in the record's time zone, as in deadlinePassed.
+                    let instant = record.dueDateOnly ? Self.sameCalendarDay(due, from: record.timeZoneID, in: calendar) : due
+                    return instant >= day && instant < end
+                } ?? false
                 let planEnd = record.endAt ?? record.dueAt ?? end
                 let plannedInRange = record.hasPlannedStart && record.startAt < end && planEnd >= day
                 include = dueInRange || plannedInRange

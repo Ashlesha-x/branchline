@@ -101,8 +101,8 @@ struct RouteRelationMarker: View {
             else { showing.toggle() }
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: outgoing ? "arrow.up.right" : "arrow.down.left").font(.system(size: 9, weight: .medium))
-                if !iconOnly && width > 28 { Text(caption).font(.system(size: 9)).lineLimit(1).truncationMode(.tail) }
+                Image(systemName: outgoing ? "arrow.up.right" : "arrow.down.left").font(.system(size: 11, weight: .medium))
+                if !iconOnly && width > 28 { Text(caption).font(.system(size: 11)).lineLimit(1).truncationMode(.tail) }
             }.frame(width: width, height: 20).foregroundStyle(color.opacity(0.8))
                 .opacity(relations.contains(where: store.relationExpanded) ? 0 : 1)
                 .contentShape(Rectangle())

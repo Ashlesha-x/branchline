@@ -105,7 +105,15 @@ func expectThrows(_ body: () throws -> Void) throws {
             ("quick deadline retains local time", quickDeadlineRetainsLocalTimeAcrossZones),
             ("quick deadline handles DST gap", quickDeadlineHandlesDSTGapOnChosenDay),
             ("browsing history restores context and occurrence", browseHistoryRestoresContextAndOccurrence),
-            ("browsing history skips invalid and bounds visits", browseHistorySkipsMissingEntriesAndStaysBounded)
+            ("browsing history skips invalid and bounds visits", browseHistorySkipsMissingEntriesAndStaysBounded),
+            ("day order tolerates time zone changes", dayOrderToleratesTimeZoneChanges),
+            ("trash 30-day retention and permanent delete", trashRetentionAndPermanentDelete),
+            ("trash restore survives save and reopen", trashRestoreSurvivesReopen),
+            ("automation rejects conflicting location", automationRejectsConflictingLocation),
+            ("automation batch completion order independent", automationBatchCompletionOrderIndependent),
+            ("automation date-only due keeps its day", automationDateOnlyDueKeepsDay),
+            ("recurring catch-up adds only latest missed", recurringCatchUpAddsOnlyLatestMissed),
+            ("occurrences ignore system calendar kind", occurrencesIgnoreSystemCalendarKind)
         ]
         let filter = ProcessInfo.processInfo.environment["BRANCHLINE_CHECK_FILTER"]
         let selected = cases.filter { filter == nil || $0.0.range(of: filter!, options: .regularExpression) != nil }

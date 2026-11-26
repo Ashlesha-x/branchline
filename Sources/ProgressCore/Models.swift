@@ -135,7 +135,12 @@ public struct WorkspaceError: LocalizedError, Equatable {
 }
 
 extension Workspace {
-    public func validate() throws {
+    public func validate() throws { try validate(strictDayOrder: []) }
+    /// Day-order rules compare calendar days, which depend on the Mac's current time zone.
+    /// Entities in `strictDayOrder` are checked by the current calendar; all others use a
+    /// zone-independent bound (strictly less than one day earlier), so travelling or changing
+    /// the system time zone never makes already-saved data invalid.
+    public func validate(strictDayOrder strict: Set<UUID>) throws {
         guard version == 4 else { throw WorkspaceError("不支持这份备份的数据版本，请使用对应版本的应用。") }
         guard Set(trash.map(\.id)).count == trash.count else { throw WorkspaceError("回收站标识重复。") }
         for entry in trash { try entry.validate() }
@@ -145,7 +150,7 @@ extension Workspace {
         for project in projects {
             try requireTitle(project.title)
             guard RouteColors.isValid(project.color) else { throw WorkspaceError("项目颜色无效。") }
-            try validateClosure(title: project.title, start: project.createdAt, end: project.closedAt, archive: project.archivedAt, latestMerge: merges.filter { $0.projectID == project.id }.map(\.date).max())
+            try validateClosure(title: project.title, start: project.createdAt, end: project.closedAt, archive: project.archivedAt, latestMerge: merges.filter { $0.projectID == project.id }.map(\.date).max(), strict: strict.contains(project.id))
         }
         for branch in branches {
             try requireTitle(branch.title)
@@ -153,9 +158,9 @@ extension Workspace {
             if let origin = branch.originProjectID, !branch.projectIDs.contains(origin) { throw WorkspaceError("分支起点必须属于关联项目。") }
             if let parentID = branch.originBranchID {
                 guard branch.originProjectID == nil, let parent = self.branch(parentID), !branchAncestors(branch.id).contains(branch.id) else { throw WorkspaceError("父分支不存在或分支关系形成循环。") }
-                guard Calendar.current.startOfDay(for: branch.startAt) >= Calendar.current.startOfDay(for: parent.startAt) else { throw WorkspaceError("子分支开始日期不能早于父分支。") }
+                guard Self.dayNotBefore(branch.startAt, parent.startAt, strict: strict.contains(branch.id)) else { throw WorkspaceError("子分支开始日期不能早于父分支。") }
             }
-            try validateClosure(title: branch.title, start: branch.startAt, end: branch.closedAt, archive: branch.archivedAt, latestMerge: merges.filter { $0.branchID == branch.id || $0.targetBranchID == branch.id }.map(\.date).max())
+            try validateClosure(title: branch.title, start: branch.startAt, end: branch.closedAt, archive: branch.archivedAt, latestMerge: merges.filter { $0.branchID == branch.id || $0.targetBranchID == branch.id }.map(\.date).max(), strict: strict.contains(branch.id))
         }
         try validateTaskPlans()
         for record in records {
@@ -196,7 +201,7 @@ extension Workspace {
             }
             try requireTitle(merge.summary)
             guard merge.date >= branch.startAt else { throw WorkspaceError("合并时间不能早于分支开始时间。") }
-            if let target = project(merge.projectID), Calendar.current.startOfDay(for: merge.date) < Calendar.current.startOfDay(for: target.createdAt) { throw WorkspaceError("合并日期不能早于目标项目开始日期。") }
+            if let target = project(merge.projectID), !Self.dayNotBefore(merge.date, target.createdAt, strict: strict.contains(merge.id)) { throw WorkspaceError("合并日期不能早于目标项目开始日期。") }
             guard Set(merge.sourceRecordIDs).isSubset(of: recordIDs), merge.sourceRecordIDs.allSatisfy({ record($0)?.branchID == merge.branchID }) else { throw WorkspaceError("合并引用的记录必须属于来源分支。") }
         }
         var visiting = Set<UUID>(), finished = Set<UUID>()
@@ -213,15 +218,39 @@ extension Workspace {
     private func requireTitle(_ value: String) throws {
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw WorkspaceError("名称或摘要不能为空。") }
     }
-    private func validateClosure(title: String, start: Date, end: Date?, archive: Date?, latestMerge: Date?) throws {
-        let calendar = Calendar.current
+    /// `later` falls on the same calendar day as `earlier` or after it. Non-strict checks accept
+    /// any pair that is valid in some time zone: less than 24 hours earlier.
+    public static func dayNotBefore(_ later: Date, _ earlier: Date, strict: Bool, calendar: Calendar = .current) -> Bool {
+        if calendar.startOfDay(for: later) >= calendar.startOfDay(for: earlier) { return true }
+        return !strict && later.timeIntervalSince(earlier) > -86_400
+    }
+    private func validateClosure(title: String, start: Date, end: Date?, archive: Date?, latestMerge: Date?, strict: Bool) throws {
         for (label, value) in [("结束", end), ("归档", archive)] {
             guard let value else { continue } // Older backups did not store closure dates.
-            let day = calendar.startOfDay(for: value)
-            guard day >= calendar.startOfDay(for: start) else { throw WorkspaceError("「\(title)」的\(label)日期不能早于开始日期。") }
-            if let latestMerge, day < calendar.startOfDay(for: latestMerge) { throw WorkspaceError("「\(title)」的\(label)日期不能早于最近一次合并日期（\(latestMerge.formatted(date: .numeric, time: .omitted))）。") }
+            guard Self.dayNotBefore(value, start, strict: strict) else { throw WorkspaceError("「\(title)」的\(label)日期不能早于开始日期。") }
+            if let latestMerge, !Self.dayNotBefore(value, latestMerge, strict: strict) { throw WorkspaceError("「\(title)」的\(label)日期不能早于最近一次合并日期（\(latestMerge.formatted(date: .numeric, time: .omitted))）。") }
         }
-        if let end, let archive, calendar.startOfDay(for: archive) < calendar.startOfDay(for: end) { throw WorkspaceError("「\(title)」的归档日期不能早于结束日期。") }
+        if let end, let archive, !Self.dayNotBefore(archive, end, strict: strict) { throw WorkspaceError("「\(title)」的归档日期不能早于结束日期。") }
+    }
+    /// IDs whose day-order inputs differ from `old`; these are checked strictly on write.
+    public func dayOrderChanges(since old: Workspace) -> Set<UUID> {
+        var ids = Set<UUID>()
+        for p in projects {
+            let before = old.project(p.id)
+            if before?.createdAt != p.createdAt || before?.closedAt != p.closedAt || before?.archivedAt != p.archivedAt { ids.insert(p.id) }
+        }
+        for b in branches {
+            let before = old.branch(b.id)
+            if before?.startAt != b.startAt || before?.closedAt != b.closedAt || before?.archivedAt != b.archivedAt || before?.originBranchID != b.originBranchID { ids.insert(b.id) }
+        }
+        let oldMerges = Dictionary(old.merges.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for m in merges where oldMerges[m.id] != m {
+            ids.insert(m.id)
+            ids.insert(m.branchID)
+            if let target = m.targetBranchID { ids.insert(target) }
+            if let target = m.projectID { ids.insert(target) }
+        }
+        return ids
     }
     public func encoded() throws -> Data {
         try validate()
@@ -239,7 +268,8 @@ extension Workspace {
 public enum CalendarLogic {
     public static func occurrences(of record: WorkRecord, in interval: DateInterval, calendar input: Calendar = .current) -> [Date] {
         if record.repeatRule == .none { return interval.contains(record.startAt) ? [record.startAt] : [] }
-        var calendar = input; calendar.timeZone = TimeZone(identifier: record.timeZoneID) ?? input.timeZone
+        // Always Gregorian, matching recurrenceDate/recurrenceIndex, whatever the system calendar is.
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: record.timeZoneID) ?? input.timeZone
         let component: Calendar.Component = record.repeatRule == .daily ? .day : record.repeatRule == .weekly ? .weekOfYear : .month
         let anchor = record.recurrenceAnchor ?? record.startAt
         // Jump close to the visible interval; do not enumerate years of daily events.

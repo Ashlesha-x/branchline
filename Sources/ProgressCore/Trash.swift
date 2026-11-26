@@ -75,8 +75,20 @@ extension Workspace {
             let old = try JSONSerialization.jsonObject(with: change.before) as! [String: Any]
             let after = try JSONSerialization.jsonObject(with: afterData) as! [String: Any]
             var current = try JSONSerialization.jsonObject(with: JSONEncoder().encode(items[i])) as! [String: Any]
+            // Dates are seconds since the reference date. In-memory values carry fractions
+            // that the workspace file drops, so numbers within one second count as equal.
             func equal(_ a: Any?, _ b: Any?) -> Bool {
-                (a == nil && b == nil) || (a as? NSObject)?.isEqual(b) == true
+                if a == nil || b == nil { return a == nil && b == nil }
+                if let x = a as? NSNumber, let y = b as? NSNumber {
+                    return abs(x.doubleValue - y.doubleValue) < 1
+                }
+                if let x = a as? [Any], let y = b as? [Any] {
+                    return x.count == y.count && zip(x, y).allSatisfy { equal($0, $1) }
+                }
+                if let x = a as? [String: Any], let y = b as? [String: Any] {
+                    return Set(x.keys) == Set(y.keys) && x.allSatisfy { equal($0.value, y[$0.key]) }
+                }
+                return (a as? NSObject)?.isEqual(b) == true
             }
             // Undo only fields touched by deletion; keep later edits to unrelated fields.
             for key in Set(old.keys).union(after.keys) where key != "updatedAt" && !equal(old[key], after[key]) {
@@ -99,6 +111,34 @@ extension Workspace {
         next.trashEntries = trash.filter { $0.id != id }
         do { try next.validate() }
         catch { throw WorkspaceError("恢复需要的项目、分支或日期关系已变化，请先恢复关联内容。\(error.localizedDescription)") }
+        return next
+    }
+}
+
+extension Workspace {
+    /// Trash entries and external operation receipts are kept for this many days.
+    public static let retentionDays = 30
+    /// Drops trash entries and automation receipts older than the retention window.
+    /// Returns whether anything was removed.
+    @discardableResult public mutating func pruneExpired(now: Date, days: Int = Workspace.retentionDays) -> Bool {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
+        var changed = false
+        if let entries = trashEntries {
+            let kept = entries.filter { $0.deletedAt >= cutoff }
+            if kept.count != entries.count { trashEntries = kept; changed = true }
+        }
+        if let receipts = automationReceipts {
+            let kept = receipts.filter { $0.date >= cutoff }
+            if kept.count != receipts.count { automationReceipts = kept; changed = true }
+        }
+        return changed
+    }
+    /// Permanently removes one trash entry; its content can no longer be restored.
+    public func purgingTrash(_ id: UUID) throws -> Workspace {
+        guard trash.contains(where: { $0.id == id }) else { throw WorkspaceError("此删除操作已恢复或不存在。") }
+        var next = self
+        next.trashEntries = trash.filter { $0.id != id }
+        try next.validate()
         return next
     }
 }

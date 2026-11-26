@@ -140,6 +140,10 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     private var personalRepository: WorkspaceRepository?
     @ObservationIgnored private var processLock: WorkspaceProcessLock?
     @ObservationIgnored private var bridge: LocalBridgeServer?
+    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+    /// The latest deletion stays undoable from the status bar for a few seconds only.
+    var recentDeletionID: UUID?
+    @ObservationIgnored private var recentDeletionTask: Task<Void, Never>?
     var automationMode = "readWrite"
     var automationRunning: Bool { bridge != nil }
     private(set) var automationStartupError: String?
@@ -170,13 +174,16 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             let repo = try WorkspaceRepository(url: dataDirectory.appendingPathComponent("personal.store"))
             try recoverInterruptedMigration(using: repo)
             personalRepository = repo; repository = repo
-            workspace = try repo.load() ?? Workspace()
+            var loaded = try repo.load() ?? Workspace()
+            if loaded.pruneExpired(now: Date()) { try? repo.save(loaded) }
+            workspace = loaded
+            pruneBackupFiles()
             loadDrafts()
             refreshRecurringTasks()
             restoreCollapsed(); restoreRouteDetails()
             if arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "BranchlineDemo") as? Bool == true { try switchSpace(demo: true) }
             else { notifications.refresh(workspace: workspace, demo: false) }
-            automationMode = UserDefaults.standard.string(forKey: "automationMode." + dataDirectory.path) ?? "readWrite"
+            automationMode = initialAutomationMode()
             do {
                 bridge = try LocalBridgeServer(directory: dataDirectory) { [weak self] request in
                     guard let self else { return .object(["ok": .bool(false), "error": .string("app_closed")]) }
@@ -185,6 +192,34 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             } catch { automationStartupError = error.localizedDescription }
         } catch { startupError = "无法打开本地资料库。原文件未被替换。\n\(error.localizedDescription)" }
         startICloudBackupMonitor()
+        // The main window's view hierarchy is gone in menu-bar mode, so flush here.
+        terminationObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.flushDrafts(); self?.flushReviewDraft()
+                self?.bridge?.invalidate()
+            }
+        }
+    }
+    /// New data directories start with the local API off. A directory that already ran an
+    /// earlier version (its endpoint file exists) keeps the previous default of read/write.
+    private func initialAutomationMode() -> String {
+        let key = "automationMode." + dataDirectory.path
+        if let stored = UserDefaults.standard.string(forKey: key) { return stored }
+        let earlier = FileManager.default.fileExists(atPath: dataDirectory.appendingPathComponent("automation-endpoint.json").path)
+        let mode = earlier ? "readWrite" : "off"
+        UserDefaults.standard.set(mode, forKey: key)
+        return mode
+    }
+    /// Snapshots written before deletions, external writes and restores are kept for the
+    /// same retention window as the trash. Format-upgrade snapshots are never removed.
+    func pruneBackupFiles(now: Date = Date()) {
+        let directory = dataDirectory.appendingPathComponent("Backups", isDirectory: true)
+        let cutoff = now.addingTimeInterval(-Double(Workspace.retentionDays) * 86_400)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        for file in files where ["before-delete-", "before-automation-", "before-restore-"].contains(where: { file.lastPathComponent.hasPrefix($0) }) && file.pathExtension == "json" {
+            guard let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, modified < cutoff else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
     }
     func switchSpace(demo: Bool) throws {
         guard startupError == nil else { throw WorkspaceError("请先解决资料库打开错误。") }
@@ -209,7 +244,10 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     }
     func commit(_ mutate: (inout Workspace) throws -> Void) throws {
         guard startupError == nil, let repository else { throw WorkspaceError("资料库未就绪，未保存任何修改。") }
-        var next = workspace; try mutate(&next); try next.validate(); try repository.save(next)
+        var next = workspace; try mutate(&next)
+        next.pruneExpired(now: Date())
+        // Strict day-order checks only for what this write changed; see Workspace.validate(strictDayOrder:).
+        try next.validate(strictDayOrder: next.dayOrderChanges(since: workspace)); try repository.save(next)
         workspace = next; savedAt = Date()
         if !isDemo { notifications.refresh(workspace: next, demo: false) }
         if !isDemo { checkAutomaticICloudBackup() }
@@ -240,6 +278,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
                     try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
                     try workspace.encoded().write(to: backups.appendingPathComponent("before-automation-\(UUID().uuidString).json"), options: .atomic)
                     try commit { $0 = plan.workspace }
+                    pruneBackupFiles()
                     if plan.receipt.changes.contains(where: { change in
                         change["entity"].string == "record" && change["id"].string.flatMap(UUID.init(uuidString:)).flatMap { workspace.record($0) }?.hasReminders == true
                     }) { notifications.requestAndRefresh(workspace: workspace) }
@@ -425,6 +464,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     func restoreDeletion(_ id: UUID) {
         do {
             try commit { $0 = try $0.restoringTrash(id) }
+            if recentDeletionID == id { recentDeletionID = nil }
             notice = "已恢复本次删除；之后的其他内容保留。"
         } catch { self.error = error.localizedDescription }
     }
@@ -449,6 +489,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             let backup = directory.appendingPathComponent("before-delete-\(fileDate(Date()))-\(UUID().uuidString).json")
             try workspace.encoded().write(to: backup, options: .atomic)
             try commit { $0 = next }
+            pruneBackupFiles()
             if let projectFilter, next.project(projectFilter) == nil { self.projectFilter = nil }
             switch selection {
             case .project(let id): if next.project(id) == nil { selection = nil }
@@ -462,7 +503,13 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
                 persistCollapsed(in: scope)
             }
             selectedOccurrence = nil
-            notice = "已移入回收站，可撤销本次删除。"
+            notice = "已移入回收站，可撤销本次删除。回收站内容保留 \(Workspace.retentionDays) 天。"
+            recentDeletionID = next.trash.last?.id
+            recentDeletionTask?.cancel()
+            recentDeletionTask = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                self?.recentDeletionID = nil
+            }
     }
     func openBackupFolder() {
         do {
@@ -556,7 +603,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     }
     private func restoreBackup(from url: URL, revision: Int) throws {
         let bytes = try Data(contentsOf: url)
-        guard bytes.count < 30_000_000 else { throw WorkspaceError("备份超过 30 MB，请先检查文件。") }
+        guard bytes.count < 100_000_000 else { throw WorkspaceError("备份超过 100 MB，请先检查文件。") }
         let decoded = try MigrationBackup.decoded(bytes)
         let previous = try migrationSnapshot()
         let next = MigrationBackup(workspace: decoded.workspace, drafts: decoded.includesDrafts ? decoded.drafts : previous.drafts, review: decoded.includesReview ? decoded.review : previous.review)
@@ -619,7 +666,10 @@ func shortDate(_ date: Date) -> String {
     return date.formatted(style.locale(Locale(identifier: "zh_CN")))
 }
 func fullDate(_ date: Date) -> String { date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN"))) }
-func fileDate(_ date: Date) -> String { let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"; return f.string(from: date) }
+func fileDate(_ date: Date) -> String {
+    let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.calendar = Calendar(identifier: .gregorian); f.dateFormat = "yyyyMMdd-HHmmss"
+    return f.string(from: date)
+}
 func projectColor(_ index: Int) -> Color {
     let rgb = RouteColors.rgb(index)
     return Color(nsColor: NSColor(name: nil) { appearance in
