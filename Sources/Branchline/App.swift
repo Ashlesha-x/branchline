@@ -17,7 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { EditorProtection.shared.prepareForTermination() ? .terminateNow : .terminateCancel }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationDidFinishLaunching(_ notification: Notification) { DialogPresentation.install(); NSApp.setActivationPolicy(.accessory); NSApp.activate(ignoringOtherApps: true) }
+    func applicationDidFinishLaunching(_ notification: Notification) { DialogPresentation.install(); NSApp.setActivationPolicy(.accessory); NSApp.activate(ignoringOtherApps: true); AppUpdater.shared.start() }
+    func applicationWillTerminate(_ notification: Notification) { AppUpdater.shared.installOnQuitIfReady() }
 }
 
 @main struct BranchlineApp: App {
@@ -290,7 +291,7 @@ struct Sidebar: View {
         }.background(.bar)
     }
     private func navRow(_ title: String, symbol: String, selected: Bool, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) { HStack { Image(systemName: symbol).foregroundStyle(color); Text(title).lineLimit(1); Spacer(minLength: 0) }.padding(.horizontal, 10).padding(.vertical, 9).background(selected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain)
+        Button(action: action) { HStack { Image(systemName: symbol).foregroundStyle(color); Text(title).lineLimit(1); Spacer(minLength: 0); if symbol == "gearshape" && AppUpdater.shared.hasUpdate { Text("有更新").font(.caption2.weight(.semibold)).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2).background(Color.accentColor, in: Capsule()) } }.padding(.horizontal, 10).padding(.vertical, 9).background(selected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain)
     }
     private func changeSpace(_ demo: Bool) { do { try store.switchSpace(demo: demo) } catch { store.error = error.localizedDescription } }
     private func projectEntry(_ project: Project) -> some View {

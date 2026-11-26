@@ -497,9 +497,7 @@ struct SettingsPanel: View {
                         Button("选择事件同步…") { store.showingCalendar = true }.disabled(store.fileDialogPending)
                     }
                 }
-                Section("关于") {
-                    LabeledContent("版本", value: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版") + " · 个人预览版")
-                }
+                UpdateSettingsSection(updater: AppUpdater.shared)
             }.formStyle(.grouped).rememberingBrowsePosition(store, surface: "settings")
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { store.loginItem.refresh() }
