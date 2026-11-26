@@ -24,11 +24,15 @@ public enum ICloudBackupFiles {
     /// Device label embedded in a file name, if any (between the timestamp and the marker/uuid).
     public static func device(in name: String) -> String? {
         let parts = name.replacingOccurrences(of: ".json", with: "").components(separatedBy: "-")
-        // 脉络, 空间, yyyyMMdd, HHmm[ss], device?, (自动)?, uuid(5 parts)
-        guard parts.count >= 4 + 5 else { return nil }
-        let head = parts.dropLast(5)
-        var rest = Array(head.dropFirst(4))
+        // 脉络, 空间, stamp (yyyyMMdd-HHmm[ss] or one part), device?, (自动)?, uuid(5 parts)
+        guard parts.count >= 3 + 5 else { return nil }
+        var rest = Array(parts.dropLast(5).dropFirst(2))
         if rest.last == "自动" { rest.removeLast() }
+        // The stamp is "yyyyMMdd-HHmm[ss]" (two parts) when it looks like one, otherwise a single part.
+        let isDigits: (String) -> Bool = { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+        let stampWidth = rest.count >= 2 && rest[0].count == 8 && isDigits(rest[0]) && isDigits(rest[1]) ? 2 : 1
+        guard rest.count > stampWidth else { return nil }
+        rest.removeFirst(stampWidth)
         let joined = rest.joined(separator: "-")
         return joined.isEmpty ? nil : joined
     }
@@ -37,8 +41,14 @@ public enum ICloudBackupFiles {
     /// earlier calendar month. Returns the files that may be deleted.
     public static func prunable(_ files: [(name: String, date: Date)], device: String, keepRecent: Int = 30, calendar: Calendar = .current) -> [String] {
         let tag = sanitize(device)
-        let automatic = files.filter { isAutomatic($0.name) && (device(in: $0.name) ?? "") == tag }
-            .sorted { $0.date == $1.date ? $0.name > $1.name : $0.date > $1.date }
+        let mine = files.filter { file -> Bool in
+            guard isAutomatic(file.name) else { return false }
+            let label: String = Self.device(in: file.name) ?? ""
+            return label == tag
+        }
+        let automatic = mine.sorted { a, b -> Bool in
+            a.date == b.date ? a.name > b.name : a.date > b.date
+        }
         guard automatic.count > keepRecent else { return [] }
         var keptMonths = Set<DateComponents>()
         for file in automatic.prefix(keepRecent) { keptMonths.insert(calendar.dateComponents([.year, .month], from: file.date)) }
