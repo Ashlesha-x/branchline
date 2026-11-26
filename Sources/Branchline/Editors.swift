@@ -29,7 +29,7 @@ struct EditorShell<Content: View>: View {
             Divider()
             if let error { Text(error).font(.callout).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 22).padding(.top, 12).accessibilityIdentifier("editorError") }
             HStack { if let draftStatus { Text(draftStatus).font(.caption).foregroundStyle(.secondary) }; if let keepDraft { Button("存为草稿") { if keepDraft() { EditorProtection.shared.clear(owner: owner); dismiss() } }.buttonStyle(.plain) }; Spacer(); Button("取消", action: close).keyboardShortcut(.cancelAction); Button(saveTitle) { guard saveValidation() else { self.error = nil; return }; do { try save(); EditorProtection.shared.clear(owner: owner); dismiss() } catch { self.error = error.localizedDescription } }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction) }.padding(20)
-        }.frame(width: 600, height: height)
+        }.frame(width: 600, height: min(height, (NSScreen.main?.visibleFrame.height ?? 900) - 80))
             .interactiveDismissDisabled(true)
             .onAppear { if baseline == nil { baseline = snapshot() }; register(); draftChanged() }
             .onChange(of: snapshot()) { _, _ in register(); draftChanged() }
@@ -437,7 +437,7 @@ struct MergeEditor: View {
 
 struct SettingsPanel: View {
     @Bindable var store: AppStore
-    @AppStorage("appearance") private var appearance = "light"
+    @AppStorage("appearance") private var appearance = "system"
     var body: some View {
         VStack(spacing: 0) {
             Form {

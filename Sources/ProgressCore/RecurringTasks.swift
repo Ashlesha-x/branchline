@@ -39,7 +39,12 @@ extension Workspace {
             let start = plan.expandedThrough ?? plan.anchor
             guard start < limit else { continue }
             var recurrence = plan.prototype; recurrence.kind = .meeting; recurrence.repeatRule = plan.rule; recurrence.startAt = plan.anchor; recurrence.recurrenceAnchor = plan.anchor; recurrence.repeatUntil = plan.until; recurrence.excludedOccurrences = nil
-            let dates = Array(CalendarLogic.occurrences(of: recurrence, in: DateInterval(start: start, end: limit), calendar: calendar).filter { $0 < limit }.prefix(200))
+            let window = Array(CalendarLogic.occurrences(of: recurrence, in: DateInterval(start: start, end: limit), calendar: calendar).filter { $0 < limit }.prefix(200))
+            // After a long absence, catch up with only the latest missed occurrence (and the
+            // plan's own first one), instead of filling the agenda with stale overdue copies.
+            let today = calendar.startOfDay(for: now)
+            let lastMissed = window.last { $0 < today }
+            let dates = window.filter { $0 >= today || $0 == lastMissed || $0 == plan.anchor }
             let existing = Set(records.filter { $0.taskSeriesID == plan.id }.compactMap { $0.taskOccurrence }.map { floor($0.timeIntervalSince1970) })
             let excluded = Set(plan.excluded.map { floor($0.timeIntervalSince1970) })
             for date in dates where !existing.contains(floor(date.timeIntervalSince1970)) && !excluded.contains(floor(date.timeIntervalSince1970)) {
@@ -54,7 +59,7 @@ extension Workspace {
                 item.taskSeriesID = plan.id; item.taskOccurrence = date; item.taskRepeatRule = plan.rule; item.taskRepeatUntil = plan.until
                 records.append(item)
             }
-            plan.expandedThrough = dates.count == 200 ? dates.last!.addingTimeInterval(1) : limit
+            plan.expandedThrough = window.count == 200 ? window.last!.addingTimeInterval(1) : limit
             plans[index] = plan; changed = true
         }
         if changed { taskPlans = plans; try validate() }

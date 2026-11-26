@@ -20,12 +20,13 @@ extension Workspace {
         if let old, Set(old.projectIDs) != Set(value.projectIDs) { history.append(ChangeRecord(entityID: value.id, summary: "更新了分支关联的项目。")) }
         if let old, old.closedAt != value.closedAt || old.archivedAt != value.archivedAt { history.append(ChangeRecord(entityID: value.id, summary: "时间更新：结束 \(value.closedAt.map { WorkDateText.date($0, timed: true) } ?? "未设置")；归档 \(value.archivedAt.map { WorkDateText.date($0, timed: true) } ?? "未设置")。")) }
     }
-    public mutating func putRecord(_ input: WorkRecord, now: Date = Date()) throws {
+    /// `checkDependencies: false` lets a batch defer the blocker check to its final state.
+    public mutating func putRecord(_ input: WorkRecord, now: Date = Date(), checkDependencies: Bool = true) throws {
         var value = input; value.updatedAt = now
         if value.status == .completed && value.completedAt == nil { value.completedAt = now }
         if value.status != .completed { value.completedAt = nil }
         let old = record(value.id)
-        if value.status == .completed && old?.status != .completed && !blockedBy(value).isEmpty { throw WorkspaceError("这项任务还有未完成的依赖。") }
+        if checkDependencies && value.status == .completed && old?.status != .completed && !blockedBy(value).isEmpty { throw WorkspaceError("这项任务还有未完成的依赖。") }
         if let i = records.firstIndex(where: { $0.id == value.id }) { records[i] = value } else { records.append(value) }
         if let old {
             if old.dueAt != value.dueAt { history.append(ChangeRecord(entityID: value.id, summary: "截止日期：\(old.dueAt.map { WorkDateText.date($0) } ?? "未设置") → \(value.dueAt.map { WorkDateText.date($0) } ?? "未设置")")) }

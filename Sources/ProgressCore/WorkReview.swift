@@ -77,7 +77,10 @@ public struct WorkReview: Codable, Equatable, Sendable {
             return "- [\(label)](\(entry.sourceURL))"
         }.joined(separator: "\n") + "\n"
     }
-    private static func day(_ date: Date) -> String { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.string(from: date) }
+    private static func day(_ date: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.calendar = Calendar(identifier: .gregorian); f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
 }
 extension Workspace {
     public func review(from: Date, through: Date, projectID: UUID?, branchID: UUID?, now: Date = Date(), calendar: Calendar = .current, format: ReviewFormat = .detailed) throws -> WorkReview {

@@ -346,7 +346,7 @@ struct TimelineView: View {
                             if lane.project != nil && !lane.collapsed { Button("展开历史") { store.toggleRouteDetails(lane.id, in: .timeline) }.buttonStyle(.plain).foregroundStyle(.tint).font(.caption2).accessibilityLabel("展开历史：\(lane.title)") }
                         }.padding(.horizontal, 12).frame(width: width, height: 22).position(x: width / 2, y: lane.y + lane.height - 12)
                     } else if lane.project != nil {
-                        Button("收起历史") { store.toggleRouteDetails(lane.id, in: .timeline) }.buttonStyle(.plain).font(.system(size: 9)).foregroundStyle(.secondary).position(x: 35, y: lane.y + lane.height - 12)
+                        Button("收起历史") { store.toggleRouteDetails(lane.id, in: .timeline) }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).position(x: 35, y: lane.y + lane.height - 12)
                     }
                     ForEach(lane.relationMarkers, id: \.first!.id) { relations in
                         if let relation = relations.first {

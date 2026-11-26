@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @Environment(\.openWindow) private var openWindow
     @LocalState private var store = AppStore()
-    @AppStorage("appearance") private var appearance = "light"
+    @AppStorage("appearance") private var appearance = "system"
     var body: some Scene {
         Window("脉络", id: "main") {
             MainView(store: store)
@@ -133,7 +133,10 @@ struct MainView: View {
                                 Text("已完成：" + action.before.title).lineLimit(1)
                                 Button("撤销完成") { store.undoAgendaCompletion() }.accessibilityIdentifier("undoTaskCompletion")
                             }
-                            if let entry = store.workspace.trash.last { Button("撤销最近删除") { store.restoreDeletion(entry.id) } }
+                            if store.iCloudBackupFailed && !store.isDemo {
+                                Button("iCloud 备份未完成") { store.openSettings() }.buttonStyle(.plain).foregroundStyle(.orange).help(store.iCloudBackupMessage)
+                            }
+                            if let id = store.recentDeletionID, store.workspace.trash.contains(where: { $0.id == id }) { Button("撤销删除") { store.restoreDeletion(id) } }
                             if !store.notice.isEmpty { Text(store.notice).lineLimit(1); Button { store.notice = "" } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("关闭提示") }
                         }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 9)
                     }
@@ -147,7 +150,6 @@ struct MainView: View {
         .onChange(of: store.selection) { _, _ in store.refreshQuickContext() }
         .onChange(of: store.projectFilter) { _, _ in store.refreshQuickContext() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in store.flushDrafts(); store.flushReviewDraft() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in store.flushDrafts(); store.flushReviewDraft() }
         .onReceive(NotificationCenter.default.publisher(for: .editorWindowClosing)) { _ in store.endQuickProgress(); store.editor = nil }
         .sheet(isPresented: $store.showingCalendar) { CalendarImportView(store: store) }
         .sheet(item: $store.editor) { route in
