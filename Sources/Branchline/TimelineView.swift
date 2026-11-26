@@ -134,7 +134,7 @@ struct TimelineView: View {
                 ScrollView(.vertical) {
                     HStack(alignment: .top, spacing: 0) {
                         VStack(spacing: 0) {
-                            HStack { Text(compact ? "工作线索" : "项目 / 分支").font(.caption).foregroundStyle(.secondary); Spacer() }.padding(.leading, 14).frame(height: headerHeight).background(Color(nsColor: .controlBackgroundColor)).offset(y: scrollY).zIndex(4)
+                            HStack { Text(compact ? "工作线索" : "项目 / 分支").font(.caption).foregroundStyle(.secondary); Spacer(); Image(systemName: "info.circle").font(.caption).foregroundStyle(.tertiary).padding(.trailing, 8).help("● 已记录　○ 计划　◆ 合并") }.padding(.leading, 14).frame(height: headerHeight).background(Color(nsColor: .controlBackgroundColor)).offset(y: scrollY).zIndex(4)
                             ForEach(rows) { lane in laneLabel(lane).frame(height: lane.height) }
                         }.frame(width: labelWidth).background(Color(nsColor: .controlBackgroundColor)).coordinateSpace(name: "routeLabels")
                         ScrollView(.horizontal) {
@@ -161,14 +161,11 @@ struct TimelineView: View {
                     PersistentScroller(horizontal: true, offset: scrollX, contentLength: max(contentWidth, viewportWidth), viewportLength: viewportWidth) { scrollPosition.scrollTo(x: $0) }.frame(height: 16)
                     Color(nsColor: .controlBackgroundColor).frame(width: 16, height: 16)
                 }
-                Divider()
-                HStack(spacing: 16) {
-                    Label("已记录", systemImage: "circle.fill")
-                    Label("计划", systemImage: "circle")
-                    Label("合并", systemImage: "diamond.fill")
-                    Spacer()
-                    if store.pinnedRelationID != nil { Button("取消固定连线") { store.pinnedRelationID = nil } }
-                }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 11)
+                if store.pinnedRelationID != nil {
+                    Divider()
+                    HStack { Spacer(); Button("取消固定连线") { store.pinnedRelationID = nil } }
+                        .font(.caption).padding(.horizontal, 16).padding(.vertical, 8)
+                }
             }
             .onAppear {
                 if store.viewportToRestore("timeline") == nil { navigate(width: viewportWidth) }

@@ -81,14 +81,10 @@ struct AgendaView: View {
                             Text("\(category.rawValue) \(store.workspace.agenda(category, now: now).count)")
                                 .font(.callout).padding(.horizontal, 10).padding(.vertical, 7)
                                 .background(scope == category ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.plain).help(scopeHelp(category))
                     }
                 }.padding(14)
             }.scrollIndicators(.hidden)
-            HStack {
-                Text(scope == .week ? "包含今天在内的七个日历日；会议按每次发生时间展示。" : scope == .today ? "今天的会议、截止任务及计划日期覆盖今天的进行中任务。" : scope == .blocked ? "这些任务仍有未完成的依赖，可点开详情处理。" : scope == .unscheduled ? "未设置计划开始、计划结束和截止日期的任务。" : "截止时间已过且仍在进行中的任务。")
-                Spacer(minLength: 0)
-            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.bottom, 12)
             Divider()
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -99,6 +95,7 @@ struct AgendaView: View {
         }.onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in now = Date() }
     }
+    private func scopeHelp(_ category: AgendaScope) -> String { category == .week ? "包含今天在内的七个日历日；会议按每次发生时间展示。" : category == .today ? "今天的会议、截止任务及计划日期覆盖今天的进行中任务。" : category == .blocked ? "这些任务仍有未完成的依赖，可点开详情处理。" : category == .unscheduled ? "未设置计划开始、计划结束和截止日期的任务。" : "截止时间已过且仍在进行中的任务。" }
     private func agendaRow(_ item: AgendaItem) -> some View {
         let record = item.record
         let projects = store.workspace.projects(for: record).compactMap { store.workspace.project($0)?.title }.joined(separator: "、")
@@ -118,10 +115,10 @@ struct AgendaView: View {
                         }.padding(18).frame(minWidth: 240, maxWidth: 340)
                     }
             }
+            if record.kind != .task { Image(systemName: record.kind.symbol).font(.title3).foregroundStyle(.secondary).frame(width: 24, height: 24) }
             Button { store.browse { store.selection = .record(record.id); store.selectedOccurrence = record.kind == .meeting ? item.date : nil; store.moveTo(item.date) } } label: {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(alignment: .top) {
-                        if record.kind != .task { Image(systemName: record.kind.symbol).foregroundStyle(.secondary) }
                         Text(record.title).fontWeight(.medium)
                         Spacer()
                         if !store.workspace.blockedBy(record).isEmpty { Text("等待依赖").font(.caption).foregroundStyle(.orange) }
@@ -129,7 +126,7 @@ struct AgendaView: View {
                     if !item.reasons.isEmpty {
                         HStack(spacing: 6) { ForEach(item.reasons, id: \.self) { reason in Text(reason.rawValue).font(.caption).padding(.horizontal, 7).padding(.vertical, 3).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 5)) } }
                     }
-                    Text(record.kind == .meeting ? WorkDateText.meeting(record, occurrence: item.date) : record.dueAt.map { "截止：" + WorkDateText.date($0, timed: !record.dueDateOnly, zone: record.timeZoneID) } ?? (record.hasPlannedStart ? "计划开始：" + WorkDateText.date(record.startAt, timed: !record.dateOnly, zone: record.timeZoneID) : "未安排日期"))
+                    Text(record.kind == .meeting ? WorkDateText.meetingShort(record, occurrence: item.date) : record.dueAt.map { "截止：" + WorkDateText.short($0, timed: !record.dueDateOnly, zone: record.timeZoneID) } ?? (record.hasPlannedStart ? "计划开始：" + WorkDateText.short(record.startAt, timed: !record.dateOnly, zone: record.timeZoneID) : "未安排日期"))
                         .font(.callout).foregroundStyle(CalendarLogic.deadlinePassed(record, now: now) ? Color.red : .secondary)
                     HStack(spacing: 7) {
                         if let branch = store.workspace.branch(record.branchID) { Text(branch.title) }
@@ -151,7 +148,7 @@ struct AgendaView: View {
                 if let day = calendar.date(byAdding: .day, value: 1, to: now) { store.changeDeadline(record.id, to: day) }
             }
             Button("选择截止日期…") { store.deadlineEditorID = record.id }
-        } label: { Image(systemName: "calendar.badge.clock").foregroundStyle(.secondary).frame(width: 24, height: 24) }
+        } label: { Label("改截止", systemImage: "calendar.badge.clock").labelStyle(.titleAndIcon).font(.caption).foregroundStyle(.secondary) }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .help("调整截止日期").accessibilityLabel("调整截止日期：\(record.title)")
             .popover(isPresented: Binding(get: { store.deadlineEditorID == record.id }, set: { if !$0 { store.deadlineEditorID = nil } })) {

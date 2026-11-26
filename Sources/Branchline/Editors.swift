@@ -23,7 +23,7 @@ struct EditorShell<Content: View>: View {
     @LocalState private var owner = UUID()
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text(title).font(.title3.weight(.semibold)); Spacer(); Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("关闭编辑") }.padding(22)
+            HStack { Text(title).font(.title3.weight(.semibold)); Spacer() }.padding(.horizontal, 22).padding(.vertical, 18)
             Divider()
             content().frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
@@ -62,7 +62,6 @@ struct ProjectEditor: View {
                     if item.status == .archived { DatePicker("归档日期", selection: Binding(get: { item.archivedAt ?? Date() }, set: { item.archivedAt = $0 }), displayedComponents: .date) }
                     if let latest = store.workspace.merges.filter({ $0.projectID == item.id }).map(\.date).max() { Text("结束 / 归档不得早于最近合并：\(fullDate(latest))").font(.caption).foregroundStyle(.secondary) }
                 }
-                Section { Text("完成、暂停和归档只改变状态。历史记录仍保留，项目可以在图中折叠。").foregroundStyle(.secondary) }
             }.formStyle(.grouped)
                 .onChange(of: item.status) { _, status in
                     if status == .completed { item.closedAt = item.closedAt ?? Date(); item.archivedAt = nil }
@@ -87,7 +86,6 @@ struct ColorPickerRow: View {
                 .popover(isPresented: $showingPalette, arrowEdge: .top) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("选择识别色").font(.headline)
-                        Text("8 个色系 × 8 级明度").font(.caption).foregroundStyle(.secondary)
                         Text("✓ 当前颜色　× 已占用").font(.caption).foregroundStyle(.secondary)
                         LazyVGrid(columns: Array(repeating: GridItem(.fixed(26), spacing: 7), count: 8), spacing: 7) {
                             ForEach(RouteColors.swatchIDs, id: \.self) { id in
@@ -110,7 +108,6 @@ struct ColorPickerRow: View {
                                     .accessibilityLabel("\(RouteColors.swatchName(id))\(unavailable ? "，已占用" : id == selection ? "，当前颜色" : "")")
                             }
                         }
-                        Text("归档项目和分支会释放颜色。色板之外的旧颜色仍会保留。").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(16).frame(width: 289)
                 }
             Button("换一个") { selection = RouteColors.choose(excluding: occupied.union([selection])) }
@@ -165,7 +162,6 @@ struct BranchEditor: View {
                     if item.status == .archived { DatePicker("归档日期", selection: Binding(get: { item.archivedAt ?? Date() }, set: { item.archivedAt = $0 }), displayedComponents: .date) }
                     if let latest = store.workspace.merges.filter({ $0.branchID == item.id || $0.targetBranchID == item.id }).map(\.date).max() { Text("结束 / 归档不得早于最近合并：\(fullDate(latest))").font(.caption).foregroundStyle(.secondary) }
                 }
-                Section { Text("共享分支只有一份记录。每次向不同项目合并时，分别保存成果摘要。已有合并关系的项目关联会保留。").foregroundStyle(.secondary) }
             }.formStyle(.grouped)
                 .onChange(of: item.projectIDs) { _, ids in if let origin = item.originProjectID, !ids.contains(origin) { item.originProjectID = nil } }
                 .onChange(of: item.status) { _, status in
@@ -192,6 +188,7 @@ struct RecordEditor: View {
     @LocalState private var titleAttempted = false
     @LocalState private var taskScope: RecurrenceScope = .occurrence
     @LocalState private var didCommit = false
+    @LocalState private var writeToCalendar = UserDefaults.standard.bool(forKey: "calendar.writeNewMeetings")
     private let original: WorkRecord?
     private let initialValue: WorkRecord
     private let draftKey: String
@@ -224,6 +221,9 @@ struct RecordEditor: View {
             }
             try store.saveRecord(item, recurrence: recurrence, taskScope: taskScope)
             didCommit = true; store.removeDraft(draftKey)
+            if writeToCalendar && recurrence == nil && item.calendarLink == nil && item.canWriteToCalendar && !store.isDemo && store.calendarService.writeTarget != nil {
+                store.writeMeetingToCalendar(item.id)
+            }
         }) {
             VStack(spacing: 0) {
                 if let id = item.taskSeriesID, store.workspace.taskPlans?.first(where: { $0.id == id })?.active == true {
@@ -309,10 +309,10 @@ struct RecordEditor: View {
             HStack(alignment: .top, spacing: 16) { RecordingLocationPicker(store: store, selection: progressLocation, required: true, focusRequest: locationFocusRequest, attempted: locationAttempted); Spacer(minLength: 0); ProgressDateButton(record: $item) }
         }
         Section {
-            TextField("记下一条进展…", text: $item.title).labelsHidden().focused($titleFocused).accessibilityIdentifier("recordTitle")
+            TextField("进展", text: $item.title, prompt: Text("记下一条进展…")).labelsHidden().focused($titleFocused).accessibilityIdentifier("recordTitle")
             if titleAttempted && item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("请写下一条进展").font(.caption).foregroundStyle(.red) }
             DisclosureGroup("添加详细说明", isExpanded: $showingDetails) {
-                TextField("详细说明", text: $item.body, axis: .vertical).lineLimit(4...10).accessibilityIdentifier("recordBody")
+                TextField("详细说明", text: $item.body, prompt: Text("详细说明"), axis: .vertical).lineLimit(4...10).accessibilityIdentifier("recordBody")
             }
         }
         materialFields
@@ -320,8 +320,19 @@ struct RecordEditor: View {
             Picker("记录类型", selection: $item.kind) { ForEach(RecordKind.allCases, id: \.self) { Text($0.title).tag($0) } }
             Toggle("只记录日期", isOn: $item.dateOnly)
             if !item.dateOnly { DatePicker("发生时间", selection: $item.startAt, displayedComponents: [.date, .hourAndMinute]) }
-            Text("时区：\(item.timeZoneID)").font(.caption).foregroundStyle(.secondary)
+            if item.timeZoneID != TimeZone.current.identifier { Text("时区：\(item.timeZoneID)").font(.caption).foregroundStyle(.secondary) }
             DisclosureGroup("提醒 · \(item.hasReminders ? "已设置" : "默认不添加")", isExpanded: $showingReminders) { reminderFields }
+        }
+    }
+    @ViewBuilder private var calendarRow: some View {
+        if let link = item.calendarLink {
+            LabeledContent("Apple 日历", value: link.calendarTitle).help("已关联。在脉络里修改后会自动写回日历。")
+        } else {
+            Toggle("同步到电脑日历", isOn: $writeToCalendar)
+                .disabled(!item.canWriteToCalendar || store.calendarService.writeTarget == nil)
+                .help(store.calendarService.writeTarget.map { "保存后写入「\($0.title)」，之后的修改自动写回。" } ?? "")
+            if store.calendarService.writeTarget == nil { Text("先在 设置 › 日历 中选择写入的日历。").font(.caption).foregroundStyle(.secondary) }
+            else if !item.canWriteToCalendar { Text("重复会议暂不能写入日历。").font(.caption).foregroundStyle(.secondary) }
         }
     }
     private var materialFields: some View {
@@ -335,7 +346,7 @@ struct RecordEditor: View {
         Section("时间") {
             if item.kind == .progress {
                 DatePicker("发生日期", selection: $item.startAt, displayedComponents: components)
-                DisclosureGroup("时间细节") { Toggle("只记录日期", isOn: $item.dateOnly); Text("时区：\(item.timeZoneID)").font(.caption).foregroundStyle(.secondary) }
+                DisclosureGroup("时间细节") { Toggle("只记录日期", isOn: $item.dateOnly); if item.timeZoneID != TimeZone.current.identifier { Text("时区：\(item.timeZoneID)").font(.caption).foregroundStyle(.secondary) } }
             } else {
                 if item.kind == .task {
                     Toggle("安排计划日期", isOn: Binding(get: { item.hasPlannedStart }, set: { item.taskScheduled = $0; if !$0 { item.endAt = nil }; cleanRelativeRules() }))
@@ -353,8 +364,8 @@ struct RecordEditor: View {
                         DatePicker("截止时间", selection: Binding(get: { item.dueAt ?? item.startAt }, set: { item.dueAt = $0 }), displayedComponents: item.dueDateOnly ? .date : [.date, .hourAndMinute])
                     }
                 }
-                if item.kind == .meeting { Picker("重复", selection: $item.repeatRule) { ForEach(RepeatRule.allCases, id: \.self) { Text($0.title).tag($0) } }.disabled(recurrence?.scope == .occurrence || item.seriesID != nil); if item.repeatRule != .none { Text("取消重复时，已有单次例外会保留为独立会议。").font(.caption).foregroundStyle(.secondary) } }
-                Text("时区：\(item.timeZoneID)").font(.caption).foregroundStyle(.secondary)
+                if item.kind == .meeting { Picker("重复", selection: $item.repeatRule) { ForEach(RepeatRule.allCases, id: \.self) { Text($0.title).tag($0) } }.disabled(recurrence?.scope == .occurrence || item.seriesID != nil).help("取消重复时，已有单次例外会保留为独立会议。"); if !store.isDemo { calendarRow } }
+                if item.timeZoneID != TimeZone.current.identifier { Text("时区：\(item.timeZoneID)").font(.caption).foregroundStyle(.secondary) }
             }
         }
     }
@@ -378,9 +389,7 @@ struct RecordEditor: View {
                 }
             }
             Button("添加固定时间提醒") { item.reminderDates.append(Date().addingTimeInterval(3600)) }
-            Text("相对提醒自动跟随改期；取消对应计划日期或 DDL 会移除相应规则。固定提醒在改期保存时询问是否移动。").font(.caption).foregroundStyle(.secondary)
-            if item.repeatRule != .none && !item.reminderDates.isEmpty { Text("旧版及固定提醒仍以自身时间为起点重复；需要跟随每次会议时请选择相对提醒。").font(.caption).foregroundStyle(.secondary) }
-            if store.isDemo { Text("示例空间不发送系统提醒。").font(.caption).foregroundStyle(.secondary) }
+            if item.repeatRule != .none && !item.reminderDates.isEmpty { Text("固定提醒按自身时间重复；要跟随每次会议，请用相对提醒。").font(.caption).foregroundStyle(.secondary) }
         }
     }
     private func cleanRelativeRules() { if item.relativeReminders != nil { item.relativeReminders = item.relativeRules.filter { item.availableReminderRules.contains($0) } } }
@@ -420,7 +429,7 @@ struct MergeEditor: View {
                     }
                     DatePicker("合并时间", selection: $date, displayedComponents: [.date, .hourAndMinute])
                 }
-                Section("当次成果摘要") { Text("把本次阶段成果记入目标项目或父分支，保留摘要与来源记录。").font(.caption).foregroundStyle(.secondary); TextField("这次成果为项目带来了什么？", text: $summary, axis: .vertical).lineLimit(5...10) }
+                Section("当次成果摘要") { TextField("这次成果为项目带来了什么？", text: $summary, axis: .vertical).lineLimit(5...10) }
                 Section("引用记录") {
                     let records = store.workspace.records.filter { $0.branchID == branchID && $0.startAt <= date }.sorted { $0.startAt < $1.startAt }
                     if records.isEmpty { Text("暂无可引用记录，也可以直接写摘要。").foregroundStyle(.secondary) }
@@ -432,75 +441,5 @@ struct MergeEditor: View {
                 }
             }.formStyle(.grouped)
         }
-    }
-}
-
-struct SettingsPanel: View {
-    @Bindable var store: AppStore
-    @AppStorage("appearance") private var appearance = "system"
-    var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section("常用设置") {
-                    Picker("配色", selection: $appearance) { Text("浅色").tag("light"); Text("深色").tag("dark"); Text("跟随系统").tag("system") }
-                    Toggle("登录时自动启动", isOn: Binding(get: { store.loginItem.isRegistered }, set: { store.loginItem.setEnabled($0) }))
-                    if store.loginItem.status == .requiresApproval { Text(store.loginItem.statusText).font(.caption).foregroundStyle(.secondary) }
-                    if let error = store.loginItem.errorMessage { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
-                    if store.loginItem.status == .requiresApproval || store.loginItem.errorMessage != nil {
-                        Button("打开系统登录项设置") { store.loginItem.openSystemSettings() }
-                    }
-                }
-                Section("系统提醒") {
-                    Text(store.isDemo ? "示例空间不发送通知，切换个人空间后可测试。" : store.notifications.status)
-                    if !store.isDemo, let date = store.notifications.coverageUntil {
-                        LabeledContent("最远已安排", value: WorkDateText.date(date, timed: true))
-                    }
-                    if !store.isDemo, store.notifications.hasUnscheduledReminders {
-                        Text("还有提醒等待排入。脉络在菜单栏运行时会自动续排。").font(.caption).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Button("启用 / 检查权限") { store.notifications.requestAndRefresh(workspace: store.workspace) }.disabled(store.isDemo)
-                        Button("发送测试通知") { store.notifications.sendTest() }.disabled(store.isDemo).help("5 秒后发送测试通知")
-                    }
-                }
-                AIClientSettings(store: store)
-                Section("数据与恢复") {
-                    HStack {
-                        Button("导出完整备份…") { store.exportBackup() }
-                        Button("恢复整个工作区…") { store.importBackup() }
-                    }
-                    HStack {
-                        Button("回收站") { store.openTrash() }
-                        Button("本地自动备份") { store.openBackupFolder() }
-                        Button("数据文件夹") { NSWorkspace.shared.open(store.dataDirectory) }.help(store.dataDirectory.path)
-                    }
-                }
-                Section("iCloud 备份") {
-                    HStack {
-                        Button("备份到 iCloud 云盘") { store.exportICloudBackup() }
-                        if let url = store.lastICloudBackupURL { Button("在访达中查看") { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
-                    }
-                    Toggle("每日自动备份", isOn: Binding(get: { store.iCloudAutoEnabled }, set: { store.setAutomaticICloudBackup($0) }))
-                    if store.iCloudAutoEnabled {
-                        DatePicker("每日备份时间", selection: Binding(get: { store.iCloudBackupTime }, set: { store.iCloudBackupTime = $0 }), displayedComponents: [.hourAndMinute])
-                    }
-                    LabeledContent("上次成功备份", value: store.lastICloudBackupAt.map { store.iCloudBackupTimestamp($0) + " · " + store.lastICloudBackupSpace } ?? "暂无备份时间记录")
-                    if store.lastICloudBackupSpace == "示例空间", let time = store.lastPersonalICloudBackupAt { LabeledContent("上次个人空间备份", value: store.iCloudBackupTimestamp(time)) }
-                    if !store.iCloudBackupMessage.isEmpty {
-                        Text(store.iCloudBackupMessage).font(.caption).foregroundStyle(store.iCloudBackupFailed ? Color.red : Color.secondary).textSelection(.enabled)
-                    }
-                }
-                Section("Apple 日历") {
-                    HStack {
-                        Text("选择事件，单向同步到脉络").foregroundStyle(.secondary)
-                        Spacer()
-                        Button("选择事件同步…") { store.showingCalendar = true }.disabled(store.fileDialogPending)
-                    }
-                }
-                UpdateSettingsSection(updater: AppUpdater.shared)
-            }.formStyle(.grouped).rememberingBrowsePosition(store, surface: "settings")
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { store.loginItem.refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in store.loginItem.refresh() }
     }
 }

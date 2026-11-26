@@ -12,5 +12,6 @@ cp .build/release/Branchline "$bundle/Contents/MacOS/Branchline"
 cp .build/release/branchline-cli "$bundle/Contents/MacOS/branchline-cli"
 cp Resources/Info.plist "$bundle/Contents/Info.plist"
 if [ -f Resources/AppIcon.icns ]; then cp Resources/AppIcon.icns "$bundle/Contents/Resources/AppIcon.icns"; fi
+rm -rf "$bundle/Contents/Resources/zh-Hans.lproj"; cp -R Resources/zh-Hans.lproj "$bundle/Contents/Resources/zh-Hans.lproj"
 /usr/bin/codesign --force --deep --sign - --identifier local.branchline.progress "$bundle"
 echo "Built: $bundle"
