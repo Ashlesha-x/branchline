@@ -27,6 +27,39 @@ struct Inspector: View {
             Text(subtitle).font(.caption).foregroundStyle(.secondary)
         }
     }
+    private struct InfoRow: Identifiable { var label: String; var value: String; var color: Color? = nil; var id: String { label } }
+    private func timeRows(_ record: WorkRecord) -> [InfoRow] {
+        let zone = record.timeZoneID
+        var rows: [InfoRow] = []
+        switch record.kind {
+        case .progress:
+            rows.append(InfoRow(label: "发生", value: WorkDateText.short(record.startAt, timed: !record.dateOnly, zone: zone)))
+        case .meeting:
+            rows.append(InfoRow(label: "时间", value: WorkDateText.meetingShort(record, occurrence: store.selectedOccurrence)))
+            if record.repeatRule != .none { rows.append(InfoRow(label: "重复", value: record.repeatRule.title + (record.repeatUntil.map { " · 至 " + WorkDateText.short($0, zone: zone, weekday: false) } ?? ""))) }
+        case .task:
+            if record.hasPlannedStart {
+                let end = record.endAt.map { " – " + WorkDateText.short($0, timed: !record.dateOnly, zone: zone) } ?? ""
+                rows.append(InfoRow(label: "计划", value: WorkDateText.short(record.startAt, timed: !record.dateOnly, zone: zone) + end))
+            }
+            if let due = record.dueAt { rows.append(InfoRow(label: "DDL", value: WorkDateText.short(due, timed: !record.dueDateOnly, zone: zone), color: CalendarLogic.deadlinePassed(record, now: Date()) ? .red : nil)) }
+            if let rule = record.taskRepeatRule, rule != .none { rows.append(InfoRow(label: "重复", value: rule.title)) }
+        }
+        if record.kind != .progress { rows.append(InfoRow(label: "状态", value: record.status.title)) }
+        if let completed = record.completedAt { rows.append(InfoRow(label: "完成于", value: WorkDateText.short(completed, timed: true, zone: zone))) }
+        if let link = record.calendarLink { rows.append(InfoRow(label: "日历", value: link.calendarTitle + (link.disposition == .cancelled ? " · 已取消" : ""))) }
+        return rows
+    }
+    private func infoGrid(_ rows: [InfoRow]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+            ForEach(rows) { row in
+                GridRow {
+                    Text(row.label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                    Text(row.value).foregroundStyle(row.color ?? .primary).textSelection(.enabled)
+                }
+            }
+        }.font(.callout)
+    }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) { Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary); content() }
     }
@@ -74,9 +107,7 @@ struct Inspector: View {
     private func recordDetail(_ record: WorkRecord) -> some View {
         Group {
             heading(record.title, subtitle: "\(store.workspace.branch(record.branchID)?.title ?? "项目主干") / \(record.kind.title)", color: projectColor(store.workspace.branch(record.branchID)?.color ?? store.workspace.project(record.projectIDs.first)?.color ?? 0), symbol: record.kind.symbol)
-            if let link = record.calendarLink { Text("Apple 日历 · " + link.calendarTitle).font(.caption).foregroundStyle(.secondary); if link.disposition == .cancelled { Text("已取消 · 后续提醒已停止").font(.callout).foregroundStyle(.secondary) } }
-            if let rule = record.taskRepeatRule, rule != .none { Text("重复任务 · " + rule.title).font(.caption).foregroundStyle(.secondary) }
-            Text(record.kind == .meeting ? WorkDateText.meeting(record, occurrence: store.selectedOccurrence) : record.kind == .task && !record.hasPlannedStart ? "计划日期未安排" : WorkDateText.date(record.startAt, timed: !record.dateOnly, zone: record.timeZoneID)).font(.callout).foregroundStyle(.secondary)
+            section(record.kind == .progress ? "时间" : "时间与状态") { infoGrid(timeRows(record)) }
             if !record.body.isEmpty { Text(record.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8)) }
             if let materials = record.materials, !materials.isEmpty {
                 section("相关资料") {
@@ -87,21 +118,6 @@ struct Inspector: View {
                 }
             }
             projectLinks(store.workspace.projects(for: record))
-            if record.kind != .progress {
-                section(record.kind == .meeting ? "状态与重复" : "时间与状态") {
-                    if record.kind == .meeting {
-                        if record.repeatRule != .none { Text("从时间轴或待办点选具体日期后，可操作对应次会议；未点选时使用系列开始日期。").font(.caption).foregroundStyle(.secondary) }
-                    } else {
-                        Text("计划开始  \(record.hasPlannedStart ? WorkDateText.date(record.startAt, timed: !record.dateOnly, zone: record.timeZoneID) : "未安排")")
-                        Text("计划结束  \(record.endAt.map { WorkDateText.date($0, timed: !record.dateOnly, zone: record.timeZoneID) } ?? "未设置")")
-                    }
-                    if let due = record.dueAt { Text("DDL  \(WorkDateText.date(due, timed: !record.dueDateOnly, zone: record.timeZoneID))").foregroundStyle(CalendarLogic.deadlinePassed(record, now: Date()) ? Color.red : .primary) }
-                    Text(record.status.title)
-                    if let completed = record.completedAt { Text("实际完成  \(WorkDateText.date(completed, timed: true, zone: record.timeZoneID))").foregroundStyle(.secondary) }
-                    if record.repeatRule != .none { Text("\(record.repeatRule.title)重复").foregroundStyle(.secondary) }
-                    if let until = record.repeatUntil { Text("重复边界：\(WorkDateText.date(until, timed: true, zone: record.timeZoneID)) 之前").font(.caption).foregroundStyle(.secondary) }
-                }
-            }
             if !record.dependencies.isEmpty {
                 section("任务依赖") {
                     ForEach(record.dependencies, id: \.self) { id in if let task = store.workspace.record(id) { Button { store.browse { store.selection = .record(id) } } label: { Label(task.title, systemImage: task.status == .completed ? "checkmark.circle" : "hourglass") }.buttonStyle(.plain).foregroundStyle(task.status == .completed ? Color.secondary : Color.orange) } }
@@ -109,7 +125,7 @@ struct Inspector: View {
             }
             if record.hasReminders {
                 if record.kind == .meeting { meetingReminders(record) }
-                else { section("提醒") { ForEach(record.relativeRules, id: \.self) { Text($0.title + " · 随改期更新").font(.callout) }; ForEach(record.reminderDates, id: \.self) { Text("固定：" + WorkDateText.date($0, timed: true, zone: record.timeZoneID)).font(.callout) }; if store.isDemo { Text("示例空间不发送通知").font(.caption).foregroundStyle(.secondary) } } }
+                else { section("提醒") { ForEach(record.relativeRules, id: \.self) { Text($0.title + " · 随改期更新").font(.callout) }; ForEach(record.reminderDates, id: \.self) { Text("固定：" + WorkDateText.short($0, timed: true, zone: record.timeZoneID)).font(.callout) } } }
             }
             HStack {
                 if record.repeatRule != .none {
@@ -131,10 +147,9 @@ struct Inspector: View {
         let reminders = record.reminderSchedule(for: store.selectedOccurrence ?? record.startAt)
         return section("本次提醒") {
             if reminders.isEmpty { Text("本次没有提醒").foregroundStyle(.secondary) }
-            ForEach(reminders) { reminder in Text(WorkDateText.date(reminder.date, timed: true, zone: record.timeZoneID)).font(.callout) }
+            ForEach(reminders) { reminder in Text(WorkDateText.short(reminder.date, timed: true, zone: record.timeZoneID)).font(.callout) }
             if record.repeatRule != .none { Text("按系列重复").font(.caption).foregroundStyle(.secondary) }
             if !record.relativeRules.isEmpty { Text(record.relativeRules.map(\.title).joined(separator: "、")).font(.caption).foregroundStyle(.secondary) }
-            Text(store.isDemo ? "示例空间不发送通知" : "按设置计算；实际送达受系统通知权限等影响。").font(.caption).foregroundStyle(.secondary)
         }
     }
     private func mergeDetail(_ merge: MergeRecord) -> some View {
@@ -146,7 +161,6 @@ struct Inspector: View {
             section("引用记录 · 查看当前内容") {
                 ForEach(merge.sourceRecordIDs, id: \.self) { id in if let record = store.workspace.record(id) { Button(record.title) { store.browse { store.selection = .record(id) } }.buttonStyle(.link) } }
             }
-            Text("摘要保留合并时的文字，不随来源记录后续编辑而改变。").font(.caption).foregroundStyle(.secondary)
             Button("查看来源分支") { store.browse { store.selection = .branch(merge.branchID) } }
             Button("删除合并成果…", role: .destructive) { store.requestDeletion(.merge(merge.id)) }
         }

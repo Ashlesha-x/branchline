@@ -146,6 +146,23 @@ public enum WorkDateText {
         formatter.dateFormat = timed ? "yyyy年M月d日 HH:mm" : "yyyy年M月d日"
         return formatter.string(from: date)
     }
+    /// Display form used across the app: "11月24日 周二 14:00"; the year appears only when it is not the current one.
+    public static func short(_ date: Date, timed: Bool = false, zone: String = TimeZone.current.identifier, now: Date = Date(), weekday: Bool = true) -> String {
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.timeZone = TimeZone(identifier: zone) ?? .current
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = formatter.timeZone
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+        formatter.dateFormat = (sameYear ? "M月d日" : "yyyy年M月d日") + (weekday ? " EEE" : "") + (timed ? " HH:mm" : "")
+        return formatter.string(from: date)
+    }
+    public static func meetingShort(_ record: WorkRecord, occurrence: Date? = nil, now: Date = Date()) -> String {
+        let start = occurrence ?? record.startAt
+        guard let endAt = record.endAt else { return short(start, timed: true, zone: record.timeZoneID, now: now) }
+        let end = start.addingTimeInterval(endAt.timeIntervalSince(record.startAt))
+        var cal = Calendar.current; cal.timeZone = TimeZone(identifier: record.timeZoneID) ?? .current
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.timeZone = cal.timeZone; formatter.dateFormat = "HH:mm"
+        let endText = cal.isDate(start, inSameDayAs: end) ? formatter.string(from: end) : short(end, timed: true, zone: record.timeZoneID, now: now)
+        return short(start, timed: true, zone: record.timeZoneID, now: now) + "–" + endText
+    }
     public static func meeting(_ record: WorkRecord, occurrence: Date? = nil) -> String {
         let start = occurrence ?? record.startAt
         guard let endAt = record.endAt else { return date(start, timed: true, zone: record.timeZoneID) }

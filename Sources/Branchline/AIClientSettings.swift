@@ -41,9 +41,6 @@ struct AIClientSettings: View {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
             }
 
-            Text("允许访问时请保持脉络运行。关闭主窗口后仍可调用。")
-                .font(.caption).foregroundStyle(.secondary)
-
             if let configuration {
                 claudeRow(configuration)
                 gptRow(configuration)
@@ -95,13 +92,9 @@ struct AIClientSettings: View {
                     }
                     Button(copied == .codex ? "已复制" : "复制 Codex 配置") {
                         copy(.codex) { try configuration.codexTOML() }
-                    }
+                    }.help("在 Codex 的 config.toml 中添加或更新 branchline，再重启 Codex。普通 ChatGPT 聊天需要远程连接器。")
                 }
             }
-            Text("本机 Codex：在 config.toml 添加或更新 branchline，再重启 Codex。")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("普通 ChatGPT 聊天需要远程连接器。")
-                .font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 

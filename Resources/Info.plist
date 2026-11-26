@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>zh_CN</string>
+	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>
 	<string>脉络</string>
 	<key>CFBundleExecutable</key>
@@ -14,17 +14,16 @@
 	<string>local.branchline.progress</string>
 	<key>CFBundleLocalizations</key>
 	<array>
-		<string>zh_CN</string>
-		<string>en</string>
+		<string>zh-Hans</string>
 	</array>
 	<key>CFBundleName</key>
 	<string>脉络</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.16.0</string>
+	<string>0.17.0</string>
 	<key>CFBundleVersion</key>
-	<string>32</string>
+	<string>33</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>NSHighResolutionCapable</key>
@@ -45,6 +44,6 @@
 		</dict>
 	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>读取你选择的日历和时间段，将事件导入及更新为脉络中的会议。同步方向为 Apple 日历到脉络。</string>
+	<string>读取你选择的日历，把事件导入为脉络中的会议；你勾选「同步到电脑日历」的会议和已关联的会议，在脉络里修改后会写回日历。</string>
 </dict>
 </plist>

@@ -98,6 +98,8 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     var iCloudAutoEnabledSince: Date?
     var lastPersonalICloudBackupAt: Date?
     var lastPersonalICloudFingerprint: String?
+    var iCloudHasChanges = true
+    var iCloudBackups: [ICloudBackupEntry] = []
     @ObservationIgnored var iCloudBackupMonitor: Task<Void, Never>?
     @ObservationIgnored var nextICloudBackupAttempt = Date.distantPast
     var isDemo = false
@@ -127,7 +129,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     @ObservationIgnored var reviewReadFailed = false
     @ObservationIgnored var reviewNeedsWrite = false
     var expandedTaskSeries: Set<UUID> = []
-    var showingCalendar = false
+    var settingsRequest: SettingsTab?
     let calendarService = AppleCalendarService()
     var searchEntityFilter: SearchEntity?
     var focusDate = Date()
@@ -239,7 +241,7 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         repository = repo; workspace = value; isDemo = demo
         loadDrafts()
         selection = nil; projectFilter = nil; search = ""; editor = nil; showingAgenda = false; focusDate = Date(); navigationToken = UUID()
-        restoreCollapsed(); restoreRouteDetails(); pinnedRelationID = nil; hoveredRelationID = nil; notice = demo ? "示例修改仅在本次体验中保留，不会写入个人空间。" : "已切换到个人空间。"
+        restoreCollapsed(); restoreRouteDetails(); pinnedRelationID = nil; hoveredRelationID = nil; notice = demo ? "已切换到示例空间。" : "已切换到个人空间。"
         if !demo { notifications.refresh(workspace: value, demo: false) }
     }
     func commit(_ mutate: (inout Workspace) throws -> Void) throws {
@@ -248,7 +250,9 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
         next.pruneExpired(now: Date())
         // Strict day-order checks only for what this write changed; see Workspace.validate(strictDayOrder:).
         try next.validate(strictDayOrder: next.dayOrderChanges(since: workspace)); try repository.save(next)
+        let previous = workspace
         workspace = next; savedAt = Date()
+        if !isDemo { scheduleCalendarWriteBack(since: previous) }
         if !isDemo { notifications.refresh(workspace: next, demo: false) }
         if !isDemo { checkAutomaticICloudBackup() }
     }
@@ -478,9 +482,20 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             alert.addButton(withTitle: "取消")
             let deleteButton = alert.addButton(withTitle: "确认删除")
             deleteButton.hasDestructiveAction = true
-            guard DialogPresentation.confirm(alert) == .alertSecondButtonReturn else { return }
             let next = try workspace.movingToTrash(target)
+            let linked = isDemo || !calendarService.connected ? [] : next.removedCalendarLinks(since: workspace)
+            if !linked.isEmpty {
+                alert.showsSuppressionButton = true
+                alert.suppressionButton?.title = linked.count == 1 ? "同时删除 Apple 日历中的这个事件" : "同时删除 Apple 日历中的 \(linked.count) 个事件"
+                alert.suppressionButton?.state = .off
+            }
+            guard DialogPresentation.confirm(alert) == .alertSecondButtonReturn else { return }
+            let removeEvents = alert.suppressionButton?.state == .on
             try commitDeletion(next)
+            if removeEvents {
+                do { let count = try calendarService.deleteEvents(for: linked); notice = "已移入回收站，并删除 \(count) 个日历事件。" }
+                catch { self.error = "已移入回收站，但日历事件未删除：" + error.localizedDescription }
+            }
         } catch { self.error = error.localizedDescription }
     }
     private func commitDeletion(_ next: Workspace) throws {
@@ -576,8 +591,9 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             return
         }
         do {
-            try writeICloudBackup(migrationSnapshot().encoded(), demo: isDemo)
-            notice = iCloudBackupMessage
+            guard !isDemo else { return }
+            try writeICloudBackup(migrationSnapshot().encoded(), demo: false)
+            notice = "已备份到 iCloud 云盘。"
         } catch {
             iCloudBackupFailed = true
             iCloudBackupMessage = "备份未完成：\(error.localizedDescription)"
@@ -601,7 +617,15 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
             } catch { self.error = error.localizedDescription }
         }) { fileDialogPending = false; notice = "请先关闭当前编辑窗口，再选择恢复备份。" }
     }
-    private func restoreBackup(from url: URL, revision: Int) throws {
+    /// Restores a backup file chosen from a list (for example the iCloud backups in Settings).
+    func restoreBackup(at url: URL) {
+        guard !fileDialogPending else { return }
+        guard presentedEditor == nil else { notice = "请先保存或关闭编辑窗口，再恢复备份。"; return }
+        guard EditorProtection.shared.resolve() else { return }
+        endQuickProgress()
+        do { try restoreBackup(from: url, revision: workspaceRevision) } catch { self.error = error.localizedDescription }
+    }
+    func restoreBackup(from url: URL, revision: Int) throws {
         let bytes = try Data(contentsOf: url)
         guard bytes.count < 100_000_000 else { throw WorkspaceError("备份超过 100 MB，请先检查文件。") }
         let decoded = try MigrationBackup.decoded(bytes)

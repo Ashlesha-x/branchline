@@ -103,3 +103,52 @@ extension Workspace {
         try validate(); return (inserted, updated, conflicts)
     }
 }
+
+// MARK: - Writing back to Apple Calendar
+
+extension CalendarEventValue {
+    /// Lines the importer adds to the body from event fields other than notes.
+    public static let importedFieldPrefixes = ["地点：", "链接："]
+    /// The body without the lines the importer derived from location and URL, for writing into event notes.
+    public var notesForCalendar: String {
+        body.components(separatedBy: "\n").filter { line in !Self.importedFieldPrefixes.contains { line.hasPrefix($0) } }
+            .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+extension CalendarEventLink {
+    public init(key: String, calendarTitle: String, externalID: String, occurrence: Date?, calendarID: String?, eventID: String?, lastImported: CalendarEventValue) {
+        self.key = key; self.calendarTitle = calendarTitle; self.externalID = externalID; self.occurrence = occurrence
+        self.calendarID = calendarID; self.eventID = eventID; self.lastImported = lastImported
+    }
+}
+
+extension WorkRecord {
+    /// Only plain (non-repeating) meetings can be written to Apple Calendar.
+    public var canWriteToCalendar: Bool { kind == .meeting && repeatRule == .none && seriesID == nil }
+}
+
+extension Workspace {
+    /// Linked meetings whose calendar fields changed in this write and now differ from the last synced value.
+    public func calendarPushCandidates(since previous: Workspace) -> [WorkRecord] {
+        records.filter { record in
+            guard record.canWriteToCalendar, let link = record.calendarLink, link.disposition != .cancelled,
+                  let before = previous.record(record.id), before != record else { return false }
+            let now = CalendarEventValue(record)
+            return CalendarField.allCases.contains { !$0.equal(now, link.lastImported) } &&
+                CalendarField.allCases.contains { !$0.equal(now, CalendarEventValue(before)) }
+        }
+    }
+    /// Linked meetings that existed in `previous` and are gone now (deleted or moved to trash).
+    public func removedCalendarLinks(since previous: Workspace) -> [WorkRecord] {
+        let remaining = Set(records.map(\.id))
+        return previous.records.filter { $0.calendarLink != nil && $0.calendarLink?.disposition != .cancelled && !remaining.contains($0.id) }
+    }
+    /// Records the value just written to the calendar as the new sync baseline.
+    public mutating func markCalendarWritten(_ id: UUID, value: CalendarEventValue, link: CalendarEventLink? = nil) throws {
+        guard var record = record(id) else { throw WorkspaceError("会议已不存在。") }
+        if let link { record.calendarLink = link } else { record.calendarLink?.lastImported = value }
+        guard record.calendarLink != nil else { throw WorkspaceError("会议没有关联日历事件。") }
+        try putRecord(record)
+    }
+}

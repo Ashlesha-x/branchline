@@ -291,7 +291,7 @@ struct UpdateSettingsSection: View {
         Section("软件更新") {
             LabeledContent("当前版本", value: updater.currentVersion)
             Toggle("自动更新", isOn: $updater.autoUpdate)
-            Text("每天检查一次 GitHub 上的新版本并在后台下载。下载完成后可以立即重启安装，也会在退出脉络时自动安装。").font(.caption).foregroundStyle(.secondary)
+                .help("每天检查一次 GitHub 上的新版本并在后台下载。下载完成后可以立即重启安装，也会在退出脉络时自动安装。")
             HStack {
                 Button("检查更新") { Task { await updater.check(userInitiated: true) } }.disabled(updater.busy)
                 switch updater.phase {
