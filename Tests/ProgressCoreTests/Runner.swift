@@ -16,6 +16,9 @@ func expectThrows(_ body: () throws -> Void) throws {
 @main struct VerificationRunner {
     @MainActor static func main() {
         let cases: [(String, @MainActor () throws -> Void)] = [
+            ("app versions compare numerically and rank prereleases", appVersionsCompareNumericallyAndRankPrereleases),
+            ("update decision picks installable package", updateDecisionPicksInstallablePackage),
+            ("release JSON digest and download trust rules", releaseJSONDecodesDigestAndTrustRules),
             ("review presets roll forward while prior draft remains recoverable", reviewPresetsRollForwardKeepingDraft),
             ("brief review groups work and carries material links", briefReviewGroupsWorkAndCarriesMaterials),
             ("reminder queue refills and targets edited occurrence", reminderQueueRefillsAndTargetsEditedOccurrence),

@@ -25,8 +25,8 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/Ashlesha-x/branchline/releases) 下载 `Branchline-<版本>-macOS-arm64.zip`。
-2. 解压得到 `脉络.app`，可以复制到“应用程序”，也可以直接在当前位置使用。
+1. 在 [Releases](https://github.com/Ashlesha-x/branchline/releases) 下载 `Branchline-<版本>-macOS-arm64.dmg`（0.15.2 及更早版本为 .zip）。
+2. 打开磁盘映像，把 `脉络.app` 拖到“应用程序”文件夹。放在“应用程序”中才能使用自动更新。
 3. 应用使用临时签名，未经 Apple 公证。首次打开如被系统拦截，在访达中右键应用选择“打开”，或在终端执行：
 
    ```sh
@@ -38,6 +38,7 @@
 - 首次打开是空的个人空间。点击“体验示例空间”可以查看独立的演示内容，示例里的修改只在本次体验保留，不写入个人资料库。
 - 应用以菜单栏模式运行。启动时打开主窗口；关闭主窗口后继续运行，菜单栏图标提供快速录入和重新打开窗口。通过菜单栏面板的“退出”结束进程。
 - 在“设置与数据 → 常用设置”打开“登录时自动启动”，使用 macOS 原生登录项。
+- 在“设置与数据 → 软件更新”可以手动检查更新。勾选“自动更新”后，脉络每天检查一次 GitHub Releases，在后台下载新版本，点“立即重启并更新”或退出脉络时完成替换。自动更新从 0.16.0 起可用，需要应用放在可写的位置（例如“应用程序”文件夹）。
 
 ## 使用说明
 
@@ -82,6 +83,7 @@
 ```sh
 zsh scripts/build.sh   # 构建并签名，输出 dist/脉络.app
 zsh scripts/test.sh    # 运行核心检查
+zsh scripts/make-dmg.sh # 打包 dist/Branchline-<版本>-macOS-arm64.dmg（先运行 build.sh）
 ```
 
 持久化使用 Core Data，界面使用 SwiftUI，不依赖 SwiftData，也不需要完整的 XCTest。构建产物使用本机临时签名。
