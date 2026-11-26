@@ -459,7 +459,9 @@ struct SettingsPanel: View {
                         Text("还有提醒等待排入。脉络在菜单栏运行时会自动续排。").font(.caption).foregroundStyle(.secondary)
                     }
                     HStack {
-                        Button("启用 / 检查权限") { store.notifications.requestAndRefresh(workspace: store.workspace) }.disabled(store.isDemo)
+                        Button(store.notifications.needsSystemSettings ? "打开系统通知设置" : "启用通知") { store.notifications.enableOrOpenSettings(workspace: store.workspace) }
+                            .disabled(store.isDemo)
+                            .help(store.notifications.needsSystemSettings ? "打开“系统设置 › 通知”里脉络的设置页" : "请求系统通知权限；如已被拒绝，会打开系统设置")
                         Button("发送测试通知") { store.notifications.sendTest() }.disabled(store.isDemo).help("5 秒后发送测试通知")
                     }
                 }

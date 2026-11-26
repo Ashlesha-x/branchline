@@ -9,6 +9,8 @@ import ProgressCore
     var scheduledCount = 0
     var coverageUntil: Date?
     var hasUnscheduledReminders = false
+    /// 系统已拒绝（或不允许）脉络发通知，只能由用户到系统设置里打开。
+    var needsSystemSettings = false
     private var generation = 0
     @ObservationIgnored private var queueTask: Task<Void, Never>?
     @ObservationIgnored private var refillTask: Task<Void, Never>?
@@ -30,24 +32,54 @@ import ProgressCore
         Task {
             do {
                 let center = UNUserNotificationCenter.current()
-                guard try await center.requestAuthorization(options: [.alert, .sound, .badge]) else { status = "系统通知未开启；请在系统设置中允许脉络通知。"; return }
+                guard try await center.requestAuthorization(options: [.alert, .sound, .badge]) else { markDenied(); return }
                 let content = UNMutableNotificationContent(); content.title = "脉络 · 提醒测试"; content.body = "本地提醒已送达。你可以为任务和会议设置提醒。"; content.sound = .default
                 try await center.add(UNNotificationRequest(identifier: "branchline-test", content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)))
                 status = "测试通知已安排，将在约 5 秒后发送。"
             } catch {
-                if (error as? UNError)?.code == .notificationsNotAllowed { status = "系统不允许此应用发送通知；请在系统设置中检查通知权限。" }
+                if (error as? UNError)?.code == .notificationsNotAllowed { markDenied() }
                 else { status = "测试通知失败：\(error.localizedDescription)" }
             }
         }
     }
     func requestAndRefresh(workspace: Workspace) {
+        Task { _ = await requestAuthorization(workspace: workspace) }
+    }
+    /// 设置页按钮：还没问过就弹系统授权框；已被拒绝或系统不允许时直接打开系统设置里脉络的通知页。
+    func enableOrOpenSettings(workspace: Workspace) {
         Task {
-            do {
-                let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-                if granted { refresh(workspace: latestWorkspace ?? workspace, demo: false) }
-                else { status = "系统通知未开启；到期事项仍在应用中显示" }
-            } catch { status = "通知不可用：\(error.localizedDescription)" }
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            if settings.authorizationStatus == .denied { markDenied(); openSystemSettings(); return }
+            if await requestAuthorization(workspace: workspace) == false { openSystemSettings() }
         }
+    }
+    func openSystemSettings() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "local.branchline.progress"
+        let candidates = [
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleID)",
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+            "x-apple.systempreferences:com.apple.preference.notifications"
+        ]
+        for string in candidates {
+            if let url = URL(string: string), NSWorkspace.shared.open(url) { return }
+        }
+    }
+    /// 返回 true 表示已获授权；false 表示被拒绝或系统不允许。
+    private func requestAuthorization(workspace: Workspace) async -> Bool {
+        do {
+            let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            if granted { needsSystemSettings = false; refresh(workspace: latestWorkspace ?? workspace, demo: false) }
+            else { markDenied() }
+            return granted
+        } catch {
+            if (error as? UNError)?.code == .notificationsNotAllowed { markDenied() }
+            else { status = "暂时无法开启系统通知（\(error.localizedDescription)）。到期事项仍会在应用中显示。" }
+            return false
+        }
+    }
+    private func markDenied() {
+        needsSystemSettings = true
+        status = "系统通知已关闭。请在“系统设置 › 通知 › 脉络”中打开“允许通知”；到期事项仍会在应用中显示。"
     }
     func refresh(workspace: Workspace, demo: Bool) {
         guard !demo else { return }
@@ -88,9 +120,11 @@ import ProgressCore
             scheduledCount = 0
             coverageUntil = nil
             hasUnscheduledReminders = false
-            status = settings.authorizationStatus == .denied ? "系统通知未开启" : "尚未启用系统通知"
+            if settings.authorizationStatus == .denied { markDenied() }
+            else { needsSystemSettings = false; status = "尚未启用系统通知。点“启用通知”后，在系统弹窗中选择允许。" }
             return
         }
+        needsSystemSettings = false
         let queue = workspace.reminderQueue(now: Date(), capacity: 64 - (pending.count - existing.count))
         let desired = Set(queue.scheduled.map(\.id))
         let obsolete = existing.keys.filter { !desired.contains($0) }
