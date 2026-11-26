@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MainView: View {
     @Bindable var store: AppStore
+    @AppStorage("showDemoSpace") private var showDemoSpace = true
     @Environment(\.openWindow) private var openWindow
     @AppStorage("inspectorWidth") private var inspectorWidth = 340.0
     @AppStorage("canvasSidebarHidden") private var canvasSidebarHidden = false
@@ -255,7 +256,7 @@ struct MainView: View {
             Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 46, weight: .light)).foregroundStyle(.blue)
             Text("从第一条工作线索开始").font(.title2.weight(.medium))
             Text("创建项目，分出探索方向，记录每一步进展。").multilineTextAlignment(.center).foregroundStyle(.secondary)
-            HStack(spacing: 12) { Button("创建第一个项目") { store.editor = .project(Project()) }.buttonStyle(.borderedProminent); Button("体验示例空间") { switchSpace(true) } }
+            HStack(spacing: 12) { Button("创建第一个项目") { store.editor = .project(Project()) }.buttonStyle(.borderedProminent); if showDemoSpace { Button("体验示例空间") { switchSpace(true) } } }
             Button("从已有备份恢复…") { store.importBackup() }.buttonStyle(.link)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -264,6 +265,7 @@ struct MainView: View {
 
 struct Sidebar: View {
     @Bindable var store: AppStore
+    @AppStorage("showDemoSpace") private var showDemoSpace = true
     @LocalState private var hoveredRouteID: UUID?
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -290,7 +292,7 @@ struct Sidebar: View {
             VStack(alignment: .leading, spacing: 4) {
                 Menu {
                     Button("个人空间") { changeSpace(false) }
-                    Button("示例空间（独立体验）") { changeSpace(true) }
+                    if showDemoSpace { Button("示例空间（独立体验）") { changeSpace(true) } }
                 } label: { Label(store.isDemo ? "示例空间" : "个人空间", systemImage: store.isDemo ? "sparkles" : "internaldrive") }
                 .menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 10).padding(.vertical, 6)
                 navRow("设置", symbol: "gearshape", selected: store.showingSettings, color: .secondary) { store.openSettings() }

@@ -57,6 +57,7 @@ struct SettingsPage: View {
 private struct GeneralSettings: View {
     @Bindable var store: AppStore
     @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("showDemoSpace") private var showDemoSpace = true
     var body: some View {
         Form {
             Section {
@@ -66,6 +67,12 @@ private struct GeneralSettings: View {
                 if store.loginItem.status == .requiresApproval || store.loginItem.errorMessage != nil {
                     LabeledContent(store.loginItem.statusText) { Button("打开登录项设置") { store.loginItem.openSystemSettings() } }
                 }
+            }
+            Section {
+                Toggle("显示示例空间", isOn: Binding(get: { showDemoSpace }, set: { on in
+                    showDemoSpace = on
+                    if !on && store.isDemo { do { try store.switchSpace(demo: false) } catch { store.error = error.localizedDescription } }
+                })).help("关闭后，空间菜单和欢迎页不再提供示例空间。")
             }
             Section {
                 LabeledContent("数据文件夹") { Button("在访达中显示") { NSWorkspace.shared.open(store.dataDirectory) }.help(store.dataDirectory.path) }
