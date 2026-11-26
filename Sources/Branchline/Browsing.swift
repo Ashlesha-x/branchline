@@ -44,8 +44,13 @@ extension AppStore {
         guard editor == nil else { return }
         browse { mainPage = .trash; projectFilter = nil; selection = nil; search = "" }
     }
-    /// Asks the main window to open the Settings window on a tab (see `settingsOpener`).
-    func openSettings(_ tab: SettingsTab = .general) { settingsRequest = tab }
+    /// Shows Settings in the main window, optionally on a given section.
+    func openSettings(_ tab: SettingsTab? = nil) {
+        if let tab { UserDefaults.standard.set(tab.rawValue, forKey: "settingsTab") }
+        editor = nil
+        guard editor == nil else { return }
+        browse { mainPage = .settings; projectFilter = nil; selection = nil; search = "" }
+    }
     func canRestore(_ location: BrowseLocation) -> Bool {
         if let project = location.project, workspace.project(project) == nil { return false }
         switch location.selection {

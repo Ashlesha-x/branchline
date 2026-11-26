@@ -2,41 +2,54 @@ import SwiftUI
 import AppKit
 import ProgressCore
 
-enum SettingsTab: String, CaseIterable { case general, reminders, calendar, backup, ai, updates }
-
-/// The standard macOS Settings window (⌘,), one tab per area.
-struct SettingsWindow: View {
-    @Bindable var store: AppStore
-    @AppStorage("settingsTab") private var tab = SettingsTab.general.rawValue
-    var body: some View {
-        TabView(selection: $tab) {
-            GeneralSettings(store: store).tabItem { Label("通用", systemImage: "gearshape") }.tag(SettingsTab.general.rawValue)
-            ReminderSettings(store: store).tabItem { Label("提醒", systemImage: "bell") }.tag(SettingsTab.reminders.rawValue)
-            CalendarSettings(store: store).tabItem { Label("日历", systemImage: "calendar") }.tag(SettingsTab.calendar.rawValue)
-            BackupSettings(store: store).tabItem { Label("备份", systemImage: "externaldrive") }.tag(SettingsTab.backup.rawValue)
-            Form { AIClientSettings(store: store) }.formStyle(.grouped).tabItem { Label("AI", systemImage: "sparkles") }.tag(SettingsTab.ai.rawValue)
-            Form { UpdateSettingsSection(updater: AppUpdater.shared) }.formStyle(.grouped).tabItem { Label("更新", systemImage: "arrow.triangle.2.circlepath") }.tag(SettingsTab.updates.rawValue)
-        }
-        .frame(width: 580)
-        .frame(minHeight: 420)
-        .environment(\.locale, Locale(identifier: "zh_CN"))
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general, reminders, calendar, backup, ai, updates
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .general: "通用"; case .reminders: "提醒"; case .calendar: "日历"; case .backup: "备份与恢复"; case .ai: "AI 接入"; case .updates: "关于与更新" }
+    }
+    var symbol: String {
+        switch self { case .general: "gearshape"; case .reminders: "bell"; case .calendar: "calendar"; case .backup: "externaldrive"; case .ai: "sparkles"; case .updates: "arrow.triangle.2.circlepath" }
     }
 }
 
-extension View {
-    /// Opens Settings on a given tab and brings the app forward (the app normally runs as a menu bar accessory).
-    func settingsOpener(_ store: AppStore) -> some View { modifier(SettingsOpener(store: store)) }
-}
-private struct SettingsOpener: ViewModifier {
-    let store: AppStore
-    @Environment(\.openSettings) private var openSettings
-    func body(content: Content) -> some View {
-        content.onChange(of: store.settingsRequest) { _, request in
-            guard let request else { return }
-            UserDefaults.standard.set(request.rawValue, forKey: "settingsTab")
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
-            store.settingsRequest = nil
+/// Settings inside the main window: a column of sections on the left, the selected section on the right.
+struct SettingsPage: View {
+    @Bindable var store: AppStore
+    @AppStorage("settingsTab") private var tab = SettingsTab.general.rawValue
+    private var current: SettingsTab { SettingsTab(rawValue: tab) ?? .general }
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SettingsTab.allCases) { item in
+                    Button { tab = item.rawValue } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: item.symbol).frame(width: 18).foregroundStyle(current == item ? Color.accentColor : .secondary)
+                            Text(item.title)
+                            Spacer(minLength: 0)
+                            if item == .updates && AppUpdater.shared.hasUpdate { Circle().fill(Color.accentColor).frame(width: 7, height: 7) }
+                            if item == .calendar && store.calendarService.pendingChanges > 0 && !store.isDemo { Text("\(store.calendarService.pendingChanges)").font(.caption2).foregroundStyle(.secondary) }
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(current == item ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+                Spacer()
+            }.padding(10).frame(width: 180)
+            Divider()
+            Group {
+                switch current {
+                case .general: GeneralSettings(store: store)
+                case .reminders: ReminderSettings(store: store)
+                case .calendar: CalendarSettings(store: store)
+                case .backup: BackupSettings(store: store)
+                case .ai: Form { AIClientSettings(store: store) }.formStyle(.grouped)
+                case .updates: Form { UpdateSettingsSection(updater: AppUpdater.shared) }.formStyle(.grouped)
+                }
+            }
+            .frame(maxWidth: 680, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 }

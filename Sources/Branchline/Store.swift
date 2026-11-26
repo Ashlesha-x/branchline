@@ -129,7 +129,6 @@ enum ViewMode: String, CaseIterable { case timeline = "时间轴", graph = "脉�
     @ObservationIgnored var reviewReadFailed = false
     @ObservationIgnored var reviewNeedsWrite = false
     var expandedTaskSeries: Set<UUID> = []
-    var settingsRequest: SettingsTab?
     let calendarService = AppleCalendarService()
     var searchEntityFilter: SearchEntity?
     var focusDate = Date()

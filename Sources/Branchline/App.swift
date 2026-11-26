@@ -66,10 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Button("导出完整备份…") { store.exportBackup() }
                 Button("从备份恢复…") { store.importBackup() }
             }
-        }
-        Settings {
-            SettingsWindow(store: store)
-                .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+            CommandGroup(replacing: .appSettings) { Button("设置…") { openWindow(id: "main"); store.openSettings(); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",") }
         }
         Window("Apple 日历同步", id: "calendar-sync") {
             CalendarImportView(store: store)
@@ -115,6 +112,7 @@ struct MainView: View {
                             Divider()
                         }
                         if store.showingReview { ReviewView(store: store).id(store.browseSpaceToken) }
+                        else if store.showingSettings { SettingsPage(store: store).id(store.browseSpaceToken) }
                         else if store.showingTrash { TrashPanel(store: store).id(store.browseSpaceToken) }
                         else if store.workspace.projects.isEmpty && store.workspace.branches.isEmpty { welcome }
                         else {
@@ -159,7 +157,6 @@ struct MainView: View {
             }
         }
         .frame(minWidth: 960, minHeight: 600)
-        .settingsOpener(store)
         .onAppear { store.calendarService.loadIfAuthorized(); store.calendarService.refreshPending(workspace: store.workspace, demo: store.isDemo) }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged).debounce(for: .seconds(2), scheduler: RunLoop.main)) { _ in
             store.calendarService.refreshPending(workspace: store.workspace, demo: store.isDemo, force: true)
@@ -197,7 +194,7 @@ struct MainView: View {
                         Button { store.browseForward() } label: { Image(systemName: "chevron.right") }.disabled(!store.canBrowseForward).help("前进到下一项（⌘]）").accessibilityLabel("前进到下一项").keyboardShortcut("]", modifiers: .command)
                     }.buttonStyle(.plain)
                 }
-                Text(store.showingTrash ? "回收站" : store.showingReview ? "回顾" : store.isSearching ? "搜索" : store.showingAgenda ? "待办" : store.workspace.project(store.projectFilter)?.title ?? "全部项目").font(.title3.weight(.semibold)).lineLimit(1)
+                Text(store.showingSettings ? "设置" : store.showingTrash ? "回收站" : store.showingReview ? "回顾" : store.isSearching ? "搜索" : store.showingAgenda ? "待办" : store.workspace.project(store.projectFilter)?.title ?? "全部项目").font(.title3.weight(.semibold)).lineLimit(1)
                 if store.isDemo { Label("示例", systemImage: "sparkles").font(.caption).foregroundStyle(.secondary).help("示例空间的修改仅在本次运行保留，不会写入个人空间。可从侧栏切换空间。") }
                 Spacer(minLength: 12)
                 if store.editor == nil && store.draftRecoveryCollapsed && !store.recoverableDrafts.isEmpty {
@@ -290,14 +287,14 @@ struct Sidebar: View {
                 }.padding(.horizontal, 10)
             }
             Divider()
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Menu {
                     Button("个人空间") { changeSpace(false) }
                     Button("示例空间（独立体验）") { changeSpace(true) }
                 } label: { Label(store.isDemo ? "示例空间" : "个人空间", systemImage: store.isDemo ? "sparkles" : "internaldrive") }
-                .menuStyle(.borderlessButton)
-                navRow("设置", symbol: "gearshape", selected: false, color: .secondary) { store.openSettings() }
-            }.padding(18)
+                .menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 10).padding(.vertical, 6)
+                navRow("设置", symbol: "gearshape", selected: store.showingSettings, color: .secondary) { store.openSettings() }
+            }.padding(.horizontal, 10).padding(.vertical, 12)
         }.background(.bar)
     }
     private func navRow(_ title: String, symbol: String, selected: Bool, color: Color, action: @escaping () -> Void) -> some View {
