@@ -1,4 +1,5 @@
 import SwiftUI
+import ProgressCore
 
 /// A step-by-step tour of the main window: each stop highlights one control with a bubble
 /// that has 跳过, 上一步 and 下一步. New users get the full tour the first time the demo space
